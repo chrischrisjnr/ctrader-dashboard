@@ -1,0 +1,22 @@
+# Runs the dashboard on a Linux server that has Docker installed.
+#   1. cp .env.example .env   and set DASHBOARD_PASSWORD
+#   2. docker compose up -d
+#   3. open http://<server-ip>:3000
+services:
+  dashboard:
+    build: .
+    container_name: ctrader-dashboard
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      RUNNER: docker
+      # Same path inside and outside the container, so the cBot containers the
+      # dashboard starts can mount the uploaded .algo files and password files.
+      DATA_DIR: /opt/ctrader-dashboard/data
+      HOST_DATA_DIR: /opt/ctrader-dashboard/data
+    ports:
+      - "3000:3000"
+    volumes:
+      - /opt/ctrader-dashboard/data:/opt/ctrader-dashboard/data
+      - /var/run/docker.sock:/var/run/docker.sock

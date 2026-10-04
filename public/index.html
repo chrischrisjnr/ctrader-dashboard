@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>cBot Control</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" type="module"></script>
+</head>
+<body>
+  <!-- Login -->
+  <main id="login-view" class="login" hidden>
+    <form id="login-form" class="card login-card">
+      <h1>cBot Control</h1>
+      <p class="muted">Enter the dashboard password.</p>
+      <label>Password <input type="password" name="password" autocomplete="current-password" required autofocus></label>
+      <p class="form-error" role="alert"></p>
+      <button class="btn primary" type="submit">Log in</button>
+    </form>
+  </main>
+
+  <!-- App -->
+  <div id="app-view" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 4 8-10"/><path d="M14 5h6v6"/></svg>
+        <span>cBot Control</span>
+        <span class="badge demo">Demo accounts only</span>
+        <span class="badge" id="runner-badge"></span>
+      </div>
+      <div class="topbar-actions">
+        <span class="conn" id="conn" title="Live connection"></span>
+        <button class="btn ghost" id="logout-btn" hidden>Log out</button>
+      </div>
+    </header>
+
+    <div class="banner warn" id="sim-banner" hidden>
+      <strong>Simulation mode.</strong> Docker isn't available, so bots only print practice log lines. No orders are sent to cTrader. See the README to switch on real demo trading.
+    </div>
+
+    <section class="stats" aria-label="Summary">
+      <div class="stat"><span class="stat-label">Running</span><span class="stat-value ok" id="stat-running">0</span></div>
+      <div class="stat"><span class="stat-label">Stopped</span><span class="stat-value" id="stat-stopped">0</span></div>
+      <div class="stat"><span class="stat-label">Problems</span><span class="stat-value bad" id="stat-crashed">0</span></div>
+      <div class="stat"><span class="stat-label">Accounts</span><span class="stat-value" id="stat-accounts">0</span></div>
+      <div class="stat"><span class="stat-label">cBots</span><span class="stat-value" id="stat-bots">0</span></div>
+    </section>
+
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="instances" aria-selected="true">Bots</button>
+      <button role="tab" data-tab="accounts" aria-selected="false">Accounts</button>
+      <button role="tab" data-tab="bots" aria-selected="false">cBot files</button>
+    </nav>
+
+    <main class="content">
+      <section data-panel="instances">
+        <div class="section-head">
+          <div>
+            <h2>Bots</h2>
+            <p class="muted">Each bot is one cBot running on one account and symbol.</p>
+          </div>
+          <div class="row">
+            <button class="btn" id="start-all-btn">Start all</button>
+            <button class="btn danger-outline" id="stop-all-btn">Stop all</button>
+            <button class="btn primary" id="add-instance-btn">+ New bot</button>
+          </div>
+        </div>
+        <div class="grid" id="instances"></div>
+      </section>
+
+      <section data-panel="accounts" hidden>
+        <div class="section-head">
+          <div>
+            <h2>Demo accounts</h2>
+            <p class="muted">Your cTrader ID login and the demo account number to trade on.</p>
+          </div>
+          <button class="btn primary" id="add-account-btn">+ Add account</button>
+        </div>
+        <div class="table-wrap"><table class="table" id="accounts"></table></div>
+      </section>
+
+      <section data-panel="bots" hidden>
+        <div class="section-head">
+          <div>
+            <h2>cBot files</h2>
+            <p class="muted">Upload compiled cBots (.algo files). In cTrader, right-click a cBot → Show in folder.</p>
+          </div>
+          <button class="btn primary" id="add-bot-btn">+ Upload cBot</button>
+        </div>
+        <div class="table-wrap"><table class="table" id="bots"></table></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Account dialog -->
+  <dialog id="account-dialog">
+    <form method="dialog" class="dialog-form" id="account-form">
+      <h2 data-title>Add demo account</h2>
+      <label>Name <input name="label" required maxlength="60" placeholder="e.g. Pepperstone demo 1"></label>
+      <label>Broker <span class="muted">(optional)</span> <input name="broker" maxlength="60" placeholder="e.g. IC Markets"></label>
+      <label>cTrader ID <input name="ctid" required maxlength="120" autocomplete="username" placeholder="Email or username you log into cTrader with"></label>
+      <label>Password <input name="password" type="password" maxlength="200" autocomplete="new-password"></label>
+      <p class="hint" data-password-hint hidden>Leave empty to keep the saved password.</p>
+      <label>Account number <input name="accountNumber" required inputmode="numeric" pattern="\d+" maxlength="20" placeholder="e.g. 5123456"></label>
+      <label class="check"><input type="checkbox" name="isDemo"> I confirm this is a <strong>demo</strong> account (no real money).</label>
+      <p class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn primary" value="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- cBot upload dialog -->
+  <dialog id="bot-dialog">
+    <form method="dialog" class="dialog-form" id="bot-form">
+      <h2>Upload cBot</h2>
+      <label>File <input name="file" type="file" accept=".algo" required></label>
+      <label>Display name <span class="muted">(optional)</span> <input name="name" maxlength="60"></label>
+      <p class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn primary" value="save">Upload</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Instance dialog -->
+  <dialog id="instance-dialog">
+    <form method="dialog" class="dialog-form" id="instance-form">
+      <h2 data-title>New bot</h2>
+      <label>Name <input name="name" required maxlength="60" placeholder="e.g. Trend bot EURUSD"></label>
+      <label>cBot <select name="botId" required></select></label>
+      <label>Account <select name="accountId" required></select></label>
+      <div class="row-2">
+        <label>Symbol <input name="symbol" required maxlength="30" placeholder="EURUSD"></label>
+        <label>Timeframe <select name="period" required></select></label>
+      </div>
+      <fieldset>
+        <legend>cBot parameters <span class="muted">(optional)</span></legend>
+        <p class="hint">Names must match the cBot's parameter names exactly. Unset parameters use the cBot's defaults.</p>
+        <div id="param-rows"></div>
+        <button class="btn small" type="button" id="add-param-btn">+ Add parameter</button>
+      </fieldset>
+      <label class="check"><input type="checkbox" name="autoRestart" checked> Restart automatically if it crashes</label>
+      <label class="check"><input type="checkbox" name="fullAccess"> Give the cBot full access (only if the cBot needs internet/files)</label>
+      <p class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn primary" value="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Logs drawer -->
+  <dialog id="logs-dialog" class="drawer">
+    <div class="drawer-head">
+      <div>
+        <h2 id="logs-title">Logs</h2>
+        <p class="muted" id="logs-sub"></p>
+      </div>
+      <div class="row">
+        <label class="check small"><input type="checkbox" id="logs-follow" checked> Follow</label>
+        <button class="btn ghost" id="logs-close">Close</button>
+      </div>
+    </div>
+    <pre class="logs" id="logs-body"></pre>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+</body>
+</html>
