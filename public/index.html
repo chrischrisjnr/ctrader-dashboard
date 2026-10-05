@@ -28,7 +28,6 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 4 8-10"/><path d="M14 5h6v6"/></svg>
         <span>cBot Control</span>
         <span class="badge demo">Demo accounts only</span>
-        <span class="badge" id="runner-badge"></span>
       </div>
       <div class="topbar-actions">
         <span class="conn" id="conn" title="Live connection"></span>
@@ -36,30 +35,79 @@
       </div>
     </header>
 
-    <div class="banner warn" id="sim-banner" hidden>
-      <strong>Simulation mode.</strong> Docker isn't available, so bots only print practice log lines. No orders are sent to cTrader. See the README to switch on real demo trading.
-    </div>
 
-    <section class="stats" aria-label="Summary">
-      <div class="stat"><span class="stat-label">Running</span><span class="stat-value ok" id="stat-running">0</span></div>
-      <div class="stat"><span class="stat-label">Stopped</span><span class="stat-value" id="stat-stopped">0</span></div>
-      <div class="stat"><span class="stat-label">Problems</span><span class="stat-value bad" id="stat-crashed">0</span></div>
-      <div class="stat"><span class="stat-label">Accounts</span><span class="stat-value" id="stat-accounts">0</span></div>
-      <div class="stat"><span class="stat-label">cBots</span><span class="stat-value" id="stat-bots">0</span></div>
-    </section>
 
     <nav class="tabs" role="tablist">
-      <button role="tab" data-tab="instances" aria-selected="true">Bots</button>
-      <button role="tab" data-tab="accounts" aria-selected="false">Accounts</button>
+      <button role="tab" data-tab="monitor" aria-selected="true">Monitor</button>
+      <button role="tab" data-tab="instances" aria-selected="false">Run bots</button>
+      <button role="tab" data-tab="accounts" aria-selected="false">Bot logins</button>
       <button role="tab" data-tab="bots" aria-selected="false">cBot files</button>
     </nav>
 
     <main class="content">
-      <section data-panel="instances">
+      <section data-panel="monitor">
         <div class="section-head">
           <div>
-            <h2>Bots</h2>
-            <p class="muted">Each bot is one cBot running on one account and symbol.</p>
+            <h2>Live monitor</h2>
+            <p class="muted">All your cTrader demo accounts, including cBots running in cTrader Cloud or the cTrader app. Read-only: nothing here can place or change trades.</p>
+          </div>
+          <div class="row">
+            <span class="pill" id="mon-state"></span>
+            <button class="btn" id="mon-csv-all" hidden>Download all trade history (CSV)</button>
+            <button class="btn ghost small" id="mon-disconnect" hidden>Disconnect</button>
+          </div>
+        </div>
+
+        <div class="banner warn" id="mon-error" hidden></div>
+
+        <div class="card setup" id="mon-setup" hidden>
+          <h3>Connect your cTrader accounts (one-time setup, about 5 minutes)</h3>
+          <ol class="steps">
+            <li>
+              <strong>Create a free cTrader Open API app.</strong>
+              Go to <a href="https://openapi.ctrader.com/apps" target="_blank" rel="noopener">openapi.ctrader.com/apps</a>,
+              log in with your cTrader ID and click <em>Add new app</em>. Give it any name.
+              In <em>Redirect URIs</em>, add exactly this address:
+              <span class="copy-row"><code id="mon-redirect"></code><button class="btn small" type="button" id="mon-copy">Copy</button></span>
+              <span class="hint">cTrader reviews new apps before they work. This can take a day, so wait until the app shows as <em>Active</em>.</span>
+            </li>
+            <li>
+              <strong>Paste your app's Client ID and Secret.</strong>
+              On the same page, click <em>Credentials</em> next to your app.
+              <form id="mon-cred-form" class="inline-form">
+                <label>Client ID <input name="clientId" required autocomplete="off" spellcheck="false"></label>
+                <label>Secret <input name="clientSecret" type="password" required autocomplete="off" spellcheck="false"></label>
+                <button class="btn" type="submit">Save</button>
+              </form>
+              <p class="form-error" role="alert"></p>
+            </li>
+            <li>
+              <strong>Connect.</strong> You'll log in at cTrader and allow read-only access to your accounts.
+              <div><button class="btn primary" type="button" id="mon-connect" disabled>Connect cTrader</button></div>
+            </li>
+          </ol>
+        </div>
+
+        <section class="stats" id="mon-totals" aria-label="Totals"></section>
+        <div class="mon-accounts" id="mon-accounts"></div>
+      </section>
+
+      <section data-panel="instances" hidden>
+        <div class="banner warn" id="sim-banner" hidden>
+          <strong>Simulation mode.</strong> Docker isn't available, so bots started from this tab only print practice log lines. No orders are sent to cTrader. See the README to switch on real demo trading. (The Monitor tab is not affected.)
+        </div>
+        <section class="stats bots-stats" aria-label="Summary">
+          <div class="stat"><span class="stat-label">Running</span><span class="stat-value ok" id="stat-running">0</span></div>
+          <div class="stat"><span class="stat-label">Stopped</span><span class="stat-value" id="stat-stopped">0</span></div>
+          <div class="stat"><span class="stat-label">Problems</span><span class="stat-value bad" id="stat-crashed">0</span></div>
+          <div class="stat"><span class="stat-label">Accounts</span><span class="stat-value" id="stat-accounts">0</span></div>
+          <div class="stat"><span class="stat-label">cBots</span><span class="stat-value" id="stat-bots">0</span></div>
+        </section>
+
+        <div class="section-head">
+          <div>
+            <h2>Run cBots from this dashboard</h2>
+            <p class="muted">Optional. Each bot is one cBot on one account and symbol, started by this dashboard. Bots you run in cTrader Cloud show up in the Monitor tab instead.</p>
           </div>
           <div class="row">
             <button class="btn" id="start-all-btn">Start all</button>
@@ -73,8 +121,8 @@
       <section data-panel="accounts" hidden>
         <div class="section-head">
           <div>
-            <h2>Demo accounts</h2>
-            <p class="muted">Your cTrader ID login and the demo account number to trade on.</p>
+            <h2>Bot logins</h2>
+            <p class="muted">Only needed for cBots you run from the <em>Run bots</em> tab: your cTrader ID login and the demo account number to trade on.</p>
           </div>
           <button class="btn primary" id="add-account-btn">+ Add account</button>
         </div>

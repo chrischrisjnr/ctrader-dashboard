@@ -92,6 +92,7 @@ h2 { font-size: 1.15rem; }
 .conn { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); }
 .conn.on { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); }
 
+.content .banner { margin: 0 0 16px; }
 .banner { margin: 16px 24px 0; padding: 12px 16px; border-radius: var(--radius); border: 1px solid; }
 .banner.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); }
 
@@ -206,3 +207,37 @@ dialog.drawer[open] { display: flex; }
   .row-2 { grid-template-columns: 1fr; }
   .stat-value { font-size: 1.4rem; }
 }
+
+/* Monitor */
+.content .stats { padding: 0; margin-bottom: 20px; }
+.pos { color: var(--accent); }
+.neg { color: var(--danger); }
+.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.table .num { text-align: right; }
+
+.setup h3 { margin: 0 0 12px; font-size: 1.05rem; }
+.steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 18px; }
+.steps li { line-height: 1.6; }
+.steps li > strong { display: block; margin-bottom: 2px; }
+.steps li > .copy-row, .steps li > .hint, .steps li > form, .steps li > div { margin-top: 8px; }
+.steps li > .hint { display: block; }
+.steps li::marker { font-weight: 700; color: var(--accent); }
+.steps a { color: var(--info); }
+.copy-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.copy-row code { font-family: var(--mono); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; overflow-wrap: anywhere; }
+.inline-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.inline-form label { flex: 1 1 200px; }
+
+.mon-accounts { display: flex; flex-direction: column; gap: 16px; }
+.mon-account { display: flex; flex-direction: column; gap: 14px; }
+.mon-account header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mon-account h3 { margin: 0; font-size: 1.05rem; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.metric { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.metric > span:first-child { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.metric > span:last-child { font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mon-account .table-wrap { background: transparent; }
+.mon-account details summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.mon-account details[open] summary { margin-bottom: 8px; }
+.mon-empty { color: var(--muted); margin: 0; }
+.stat-value.small { font-size: 1.15rem; line-height: 1.5; }

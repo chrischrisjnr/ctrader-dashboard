@@ -1,8 +1,15 @@
-# cBot Control — run many cTrader cBots on many demo accounts
+# cBot Control — watch and run cTrader cBots across many demo accounts
 
-![Dashboard](screenshot.png)
+![Monitor](screenshot-monitor.png)
 
-A web dashboard where you:
+A web dashboard with two parts:
+
+**Monitor (read-only)** — connects to your cTrader ID and shows every demo account live:
+balance, equity, floating and today's profit/loss, and open trades grouped by cBot.
+It sees cBots running anywhere: **cTrader Cloud**, the cTrader app, or this dashboard.
+Download any account's **full trade history as a CSV** file (opens in Excel / Google Sheets).
+
+**Run bots (optional)** — start cBots from the dashboard itself:
 
 1. **Add your cTrader demo accounts** (cTrader ID login + demo account number).
 2. **Upload your cBots** (the compiled `.algo` files).
@@ -33,7 +40,28 @@ the supported way to run cBots without the cTrader desktop app.
 Without Docker you'll see a yellow **Simulation mode** banner: bots only print practice
 lines and never touch cTrader. That's a safe way to learn the dashboard.
 
-## Run real cBots on your demo accounts
+## Set up the Monitor
+
+The dashboard opens on the **Monitor** tab, which walks you through these steps:
+
+1. Go to <https://openapi.ctrader.com/apps>, log in with your cTrader ID and click **Add new app**.
+   Add the **Redirect URI** the Monitor tab shows you (normally `http://127.0.0.1:3000/oauth/callback`).
+   cTrader reviews new apps before they work; wait until yours shows as **Active** (can take a day).
+2. Click **Credentials** next to the app and paste the **Client ID** and **Secret** into the Monitor tab. Click **Save**.
+3. Click **Connect cTrader**, log in, and allow access. You're sent back to the dashboard and your accounts appear.
+
+The Monitor only asks cTrader for **read-only** access: it can't place, change or close trades.
+Only **demo** accounts are shown. "cBot (label)" is the label your cBot puts on its trades; trades without
+a label are grouped as "No label".
+
+**Trade history CSV** columns: account, time (UTC), deal/position/order IDs, symbol, buy/sell, open/close,
+lots, units, price, entry price, gross profit, swap, commission, net profit, balance after, cBot label, comment.
+Large histories can take a minute to prepare.
+
+## Run real cBots from the dashboard (optional)
+
+You don't need this if your cBots already run in cTrader Cloud. **Never run the same cBot on the same
+account and symbol in two places at once** — it would open double trades.
 
 ### Option A — on your own Windows or Mac computer
 
@@ -135,6 +163,9 @@ If the dashboard itself restarts, it reconnects to bots that are still running a
 ```
 server/
   index.js           app startup, security headers, runner selection
+  monitor.js         read-only live account monitor (cTrader Open API)
+  history.js         full trade history download -> CSV
+  ctrader/           Open API JSON/WebSocket client and OAuth helpers
   config.js          settings from environment / .env
   routes.js          REST API + live updates (Server-Sent Events)
   manager.js         bot lifecycle: start/stop, logs, crash detection, auto-restart
@@ -144,5 +175,5 @@ server/
   validation.js      input checks (incl. demo-only rule)
   auth.js            password login + sessions
 public/              dashboard UI (plain HTML/CSS/JS, no build step)
-test/                unit tests: `npm test`
+test/                tests (incl. a fake cTrader server): `npm test`
 ```

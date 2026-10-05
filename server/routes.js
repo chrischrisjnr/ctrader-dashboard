@@ -5,7 +5,7 @@ import multer from 'multer';
 import { newId } from './store.js';
 import { HttpError, PERIODS, validateAccount, validateInstance } from './validation.js';
 
-export function createApi({ store, manager, config, auth }) {
+export function createApi({ store, manager, monitor, config, auth }) {
   const api = express.Router();
   const botsDir = path.join(config.dataDir, 'bots');
   const secretsDir = path.join(config.dataDir, 'secrets');
@@ -167,6 +167,52 @@ export function createApi({ store, manager, config, auth }) {
     res.json(manager.list());
   });
 
+  // --- account monitor (cTrader Open API, read-only) ---------------------------
+
+  api.get('/monitor', (req, res) => {
+    res.json({ ...monitor.snapshot(), redirectUri: oauthRedirectUri(req) });
+  });
+
+  api.post('/monitor/credentials', async (req, res) => {
+    const clientId = String(req.body?.clientId ?? '').trim();
+    const clientSecret = String(req.body?.clientSecret ?? '').trim();
+    if (!/^[\w.-]{4,200}$/.test(clientId)) throw new HttpError(400, 'Client ID is not valid.');
+    if (!/^[\w.-]{4,200}$/.test(clientSecret)) throw new HttpError(400, 'Client Secret is not valid.');
+    await monitor.saveCredentials({ clientId, clientSecret });
+    res.json(monitor.snapshot());
+  });
+
+  api.post('/monitor/connect', (req, res) => {
+    try {
+      res.json({ url: monitor.beginLogin(oauthRedirectUri(req)) });
+    } catch (err) {
+      throw new HttpError(400, err.message);
+    }
+  });
+
+  api.post('/monitor/disconnect', async (_req, res) => {
+    await monitor.disconnect();
+    res.json(monitor.snapshot());
+  });
+
+  api.get('/monitor/history.csv', async (req, res) => {
+    const account = String(req.query.account || 'all');
+    let csv;
+    try {
+      csv = await monitor.exportHistoryCsv(account);
+    } catch (err) {
+      throw new HttpError(409, err.message);
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    const name = account === 'all' ? 'all-accounts' : `account-${account.replace(/\W/g, '')}`;
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="trade-history-${name}-${stamp}.csv"`,
+      'Cache-Control': 'no-store',
+    });
+    res.send(csv);
+  });
+
   // --- live updates (Server-Sent Events) ---------------------------------------
 
   api.get('/events', (req, res) => {
@@ -180,13 +226,16 @@ export function createApi({ store, manager, config, auth }) {
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     const onInstance = (view) => send('instance', view);
     const onLog = (payload) => send('log', payload);
+    const onMonitor = (snapshot) => send('monitor', snapshot);
     const heartbeat = setInterval(() => res.write(': ping\n\n'), 25_000);
     manager.on('instance', onInstance);
     manager.on('log', onLog);
+    monitor.on('update', onMonitor);
     req.on('close', () => {
       clearInterval(heartbeat);
       manager.off('instance', onInstance);
       manager.off('log', onLog);
+      monitor.off('update', onMonitor);
     });
   });
 
@@ -205,4 +254,26 @@ export function createApi({ store, manager, config, auth }) {
   });
 
   return api;
+}
+
+export function oauthRedirectUri(req) {
+  return `${req.protocol}://${req.get('host')}/oauth/callback`;
+}
+
+/** Where cTrader sends the browser back after the user approves access. */
+export function createOAuthCallback({ monitor, auth }) {
+  return async (req, res) => {
+    if (!auth.isAuthenticated(req)) return res.redirect('/');
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    if (!code) {
+      const reason = String(req.query.error_description || req.query.error || 'Access was not granted.');
+      return res.redirect(`/?monitor_error=${encodeURIComponent(reason.slice(0, 200))}`);
+    }
+    try {
+      await monitor.finishLogin({ code, redirectUri: oauthRedirectUri(req) });
+      res.redirect('/?monitor=connected');
+    } catch (err) {
+      res.redirect(`/?monitor_error=${encodeURIComponent(err.message.slice(0, 200))}`);
+    }
+  };
 }

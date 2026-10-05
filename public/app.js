@@ -515,11 +515,198 @@ function connectEvents() {
     if (source.readyState === EventSource.CLOSED) api('/session').then((s) => s.authenticated || showLogin()).catch(() => {});
   });
   source.addEventListener('instance', (event) => updateInstance(JSON.parse(event.data)));
+  source.addEventListener('monitor', (event) => {
+    state.monitor = { ...state.monitor, ...JSON.parse(event.data) };
+    renderMonitor();
+  });
   source.addEventListener('log', (event) => {
     const { id, entry } = JSON.parse(event.data);
     appendLog(id, entry);
   });
 }
+
+// --- Monitor (cTrader Open API, read-only) ----------------------------------------
+
+const MON_STATE = {
+  not_configured: ['Not set up', ''],
+  needs_login: ['Not connected', ''],
+  connecting: ['Connecting', 'starting'],
+  connected: ['Live', 'running'],
+  error: ['Reconnecting', 'crashed'],
+};
+
+function fmtMoney(value, currency = '') {
+  const n = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0);
+  return currency ? `${n} ${currency}` : n;
+}
+
+function pnl(value, currency) {
+  const sign = value > 0 ? '+' : '';
+  return h('span', { class: value > 0 ? 'pos' : value < 0 ? 'neg' : '' }, sign + fmtMoney(value, currency));
+}
+
+function metric(label, value) {
+  return h('div', { class: 'metric' }, h('span', {}, label), h('span', {}, value));
+}
+
+function renderMonitor() {
+  const m = state.monitor;
+  if (!m) return;
+  const [label, cls] = MON_STATE[m.state] || [m.state, ''];
+  const pill = $('#mon-state');
+  pill.textContent = label;
+  pill.className = `pill ${cls}`;
+
+  const live = ['connecting', 'connected', 'error'].includes(m.state);
+  $('#mon-setup').hidden = live;
+  $('#mon-disconnect').hidden = !live;
+  $('#mon-csv-all').hidden = m.state !== 'connected' || m.accounts.length < 2;
+  $('#mon-redirect').textContent = m.redirectUri || `${location.origin}/oauth/callback`;
+  $('#mon-connect').disabled = m.state === 'not_configured';
+  const credForm = $('#mon-cred-form');
+  if (m.clientId && !credForm.clientId.value && document.activeElement?.form !== credForm) credForm.clientId.value = m.clientId;
+
+  const error = $('#mon-error');
+  error.hidden = !m.error;
+  error.textContent = m.error || '';
+
+  if (!live) {
+    $('#mon-totals').replaceChildren();
+    $('#mon-accounts').replaceChildren();
+    return;
+  }
+
+  // Totals, kept separate per account currency.
+  const byCurrency = new Map();
+  for (const a of m.accounts) {
+    const t = byCurrency.get(a.currency) || { balance: 0, equity: 0, floating: 0, closed: 0 };
+    t.balance += a.balance; t.equity += a.equity; t.floating += a.floating; t.closed += a.closedToday.pnl;
+    byCurrency.set(a.currency, t);
+  }
+  const lines = (key, asPnl) => [...byCurrency].map(([cur, t]) => h('div', {}, asPnl ? pnl(t[key], cur) : fmtMoney(t[key], cur)));
+  const openTrades = m.accounts.reduce((n, a) => n + a.positions.length, 0);
+  $('#mon-totals').replaceChildren(
+    h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, 'Accounts'), h('span', { class: 'stat-value' }, m.accounts.length)),
+    h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, 'Open trades'), h('span', { class: 'stat-value' }, openTrades)),
+    h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, 'Total equity'), h('span', { class: 'stat-value small' }, lines('equity'))),
+    h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, 'Floating P&L'), h('span', { class: 'stat-value small' }, lines('floating', true))),
+    h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, 'Closed today'), h('span', { class: 'stat-value small' }, lines('closed', true))));
+
+  if (!m.accounts.length) {
+    $('#mon-accounts').replaceChildren(h('div', { class: 'empty' }, h('p', {}, m.state === 'connected'
+      ? 'No demo accounts found on this cTrader ID.' + (m.hiddenLiveAccounts ? ` (${m.hiddenLiveAccounts} live account(s) are hidden on purpose.)` : '')
+      : 'Loading your accounts…')));
+    return;
+  }
+
+  const openDetails = new Set([...document.querySelectorAll('#mon-accounts details[open]')].map((d) => d.dataset.id));
+  $('#mon-accounts').replaceChildren(...m.accounts.map((a) => {
+    const cur = a.currency;
+    const bots = a.bots.length
+      ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
+        h('thead', {}, h('tr', {}, h('th', {}, 'cBot (label)'), h('th', {}, 'Symbols'), h('th', { class: 'num' }, 'Open trades'), h('th', { class: 'num' }, 'Floating P&L'))),
+        h('tbody', {}, a.bots.map((b) => h('tr', {},
+          h('td', {}, b.name || h('span', { class: 'muted' }, 'No label (manual or unlabelled cBot)')),
+          h('td', {}, b.symbols.join(', ')),
+          h('td', { class: 'num' }, b.trades),
+          h('td', { class: 'num' }, pnl(b.floating, cur)))))))
+      : h('p', { class: 'mon-empty' }, 'No open trades right now.');
+    const positions = a.positions.length ? h('details', { dataset: { id: a.id }, open: openDetails.has(a.id) },
+      h('summary', {}, `Open trades (${a.positions.length})`),
+      h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
+        h('thead', {}, h('tr', {}, ['Symbol', 'Side', 'Lots', 'Open price', 'Opened', 'Label'].map((t) => h('th', {}, t)), h('th', { class: 'num' }, 'P&L'))),
+        h('tbody', {}, a.positions.map((p) => h('tr', {},
+          h('td', {}, p.symbol),
+          h('td', { class: p.side === 'Buy' ? 'pos' : 'neg' }, p.side),
+          h('td', {}, p.lots !== null ? +p.lots.toFixed(4) : `${p.units} units`),
+          h('td', {}, p.openPrice ?? '—'),
+          h('td', {}, p.openedAt ? new Date(p.openedAt).toLocaleString() : '—'),
+          h('td', {}, p.label || p.comment || '—'),
+          h('td', { class: 'num' }, pnl(p.netPnl, cur)))))))) : null;
+
+    return h('article', { class: 'card mon-account' },
+      h('header', {},
+        h('div', {}, h('h3', {}, `#${a.login}`), h('span', { class: 'muted' }, [a.broker, cur, 'Demo'].filter(Boolean).join(' · '))),
+        h('button', { class: 'btn small', onclick: (e) => downloadHistory(a.id, e.currentTarget) }, 'Download trade history (CSV)')),
+      a.error ? h('p', { class: 'bot-error' }, a.error) : null,
+      h('div', { class: 'metrics' },
+        metric('Balance', fmtMoney(a.balance, cur)),
+        metric('Equity', fmtMoney(a.equity, cur)),
+        metric('Floating P&L', pnl(a.floating, cur)),
+        metric(`Closed today (${a.closedToday.count})`, pnl(a.closedToday.pnl, cur))),
+      bots,
+      positions);
+  }));
+}
+
+async function downloadHistory(accountId, button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Preparing… (can take a minute)';
+  try {
+    const res = await fetch(`/api/monitor/history.csv?account=${encodeURIComponent(accountId)}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Download failed.');
+    }
+    const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'trade-history.csv';
+    const url = URL.createObjectURL(await res.blob());
+    const link = h('a', { href: url, download: name });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    toast('Trade history downloaded.');
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+$('#mon-csv-all').addEventListener('click', (e) => downloadHistory('all', e.currentTarget));
+
+$('#mon-copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('#mon-redirect').textContent);
+    toast('Copied.');
+  } catch {
+    toast('Select the address and copy it manually.', 'error');
+  }
+});
+
+$('#mon-cred-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const error = $('.form-error', form.parentElement);
+  error.textContent = '';
+  try {
+    state.monitor = { ...state.monitor, ...(await api('/monitor/credentials', {
+      method: 'POST',
+      body: { clientId: form.clientId.value, clientSecret: form.clientSecret.value },
+    })) };
+    form.clientSecret.value = '';
+    renderMonitor();
+    toast('Saved. Now press "Connect cTrader".');
+  } catch (err) {
+    error.textContent = err.message;
+  }
+});
+
+$('#mon-connect').addEventListener('click', async () => {
+  const result = await run(() => api('/monitor/connect', { method: 'POST' }));
+  if (result?.url) location.href = result.url;
+});
+
+$('#mon-disconnect').addEventListener('click', async () => {
+  if (!confirm('Disconnect the monitor from cTrader? Your cBots keep running; you can connect again any time.')) return;
+  const snapshot = await run(() => api('/monitor/disconnect', { method: 'POST' }));
+  if (snapshot) {
+    state.monitor = { ...state.monitor, ...snapshot };
+    renderMonitor();
+  }
+});
 
 // --- Boot --------------------------------------------------------------------------
 
@@ -527,24 +714,31 @@ async function boot() {
   const session = await api('/session');
   if (!session.authenticated) return showLogin();
 
-  const [status, accounts, bots, instances] = await Promise.all([
-    api('/status'), api('/accounts'), api('/bots'), api('/instances'),
+  const [status, accounts, bots, instances, monitor] = await Promise.all([
+    api('/status'), api('/accounts'), api('/bots'), api('/instances'), api('/monitor'),
   ]);
-  Object.assign(state, { status, accounts, bots, instances: new Map(instances.map((i) => [i.id, i])) });
+  Object.assign(state, { status, accounts, bots, monitor, instances: new Map(instances.map((i) => [i.id, i])) });
 
   const simulated = status.runner === 'simulation';
-  const badge = $('#runner-badge');
-  badge.textContent = simulated ? 'Simulation' : 'cTrader CLI';
-  badge.className = `badge ${simulated ? 'sim' : 'live'}`;
   $('#sim-banner').hidden = !simulated;
   $('#logout-btn').hidden = !session.authRequired;
 
   $('#login-view').hidden = true;
   $('#app-view').hidden = false;
-  let tab = 'instances';
+  let tab = 'monitor';
   try { tab = localStorage.getItem('ctdash.tab') || tab; } catch { /* storage unavailable */ }
-  selectTab(document.querySelector(`[data-tab="${tab}"]`) ? tab : 'instances');
+
+  // Coming back from cTrader's login page.
+  const params = new URLSearchParams(location.search);
+  if (params.has('monitor') || params.has('monitor_error')) {
+    tab = 'monitor';
+    if (params.get('monitor') === 'connected') toast('cTrader connected. Loading your accounts…');
+    if (params.get('monitor_error')) toast(`cTrader connection failed: ${params.get('monitor_error')}`, 'error');
+    history.replaceState(null, '', location.pathname);
+  }
+  selectTab(document.querySelector(`[data-tab="${tab}"]`) ? tab : 'monitor');
   renderAll();
+  renderMonitor();
   connectEvents();
 
   // Seed each card's "last line" preview.

@@ -54,7 +54,8 @@ export function createAuth({ password }) {
     sessions.set(token, now + SESSION_TTL_MS);
     res.cookie(COOKIE, token, {
       httpOnly: true,
-      sameSite: 'strict',
+      // Lax (not Strict) so the cookie survives the redirect back from cTrader's login page.
+      sameSite: 'lax',
       secure: req.secure,
       maxAge: SESSION_TTL_MS,
     });

@@ -21,6 +21,10 @@ export const config = Object.freeze({
   dockerBin: env.DOCKER_BIN || 'docker',
   ctraderImage: env.CTRADER_IMAGE || 'ghcr.io/spotware/ctrader-console:latest',
   dashboardPassword: env.DASHBOARD_PASSWORD || '',
+  // cTrader Open API (read-only account monitor). Demo server only.
+  openApiUrl: env.OPENAPI_URL || 'wss://demo.ctraderapi.com:5036',
+  openApiAuthBase: env.OPENAPI_AUTH_BASE || 'https://id.ctrader.com',
+  openApiTokenUrl: env.OPENAPI_TOKEN_URL || 'https://openapi.ctrader.com/apps/token',
   maxLogLines: 1000,
   maxBotUploadBytes: 50 * 1024 * 1024,
 });
