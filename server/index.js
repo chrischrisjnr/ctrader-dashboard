@@ -62,8 +62,18 @@ async function main() {
   app.get('/oauth/callback', createOAuthCallback({ monitor, auth }));
   app.use(express.static(publicDir));
 
-  const server = app.listen(config.port, config.host, () => {
+  const server = app.listen(config.port, config.host, (err) => {
+    if (err) return; // reported by the 'error' handler below
     console.log(`cTrader dashboard running at http://${config.host}:${config.port} (runner: ${runner.name})`);
+  });
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\nPort ${config.port} is already in use: the dashboard (or another program) is already running.`);
+      console.error('Close every other dashboard window, or restart your computer, then start it again.\n');
+    } else {
+      console.error(err.message);
+    }
+    process.exit(1);
   });
 
   const shutdown = async () => {

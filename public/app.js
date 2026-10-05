@@ -715,7 +715,11 @@ async function boot() {
   if (!session.authenticated) return showLogin();
 
   const [status, accounts, bots, instances, monitor] = await Promise.all([
-    api('/status'), api('/accounts'), api('/bots'), api('/instances'), api('/monitor'),
+    api('/status'), api('/accounts'), api('/bots'), api('/instances'),
+    api('/monitor').catch(() => {
+      toast('The dashboard program running on this computer is an older version. Close every dashboard window, then double-click the Start file again.', 'error');
+      return { state: 'not_configured', accounts: [] };
+    }),
   ]);
   Object.assign(state, { status, accounts, bots, monitor, instances: new Map(instances.map((i) => [i.id, i])) });
 
