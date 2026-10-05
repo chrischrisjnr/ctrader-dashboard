@@ -50,6 +50,11 @@ The dashboard opens on the **Monitor** tab, which walks you through these steps:
 2. Click **Credentials** next to the app and paste the **Client ID** and **Secret** into the Monitor tab. Click **Save**.
 3. Click **Connect cTrader**, log in, and allow access. You're sent back to the dashboard and your accounts appear.
 
+**Several cTrader IDs?** Register the Open API app **once**. Then, on the Monitor tab, use
+**+ Add another cTrader login** for each extra cTrader ID. Log out at <https://id.ctrader.com> first,
+otherwise cTrader reuses the login you're already signed in with. If all your accounts are under one
+cTrader ID, just tick them all on cTrader's "Allow access" page.
+
 The Monitor only asks cTrader for **read-only** access: it can't place, change or close trades.
 Only **demo** accounts are shown. "cBot (label)" is the label your cBot puts on its trades; trades without
 a label are grouped as "No label".

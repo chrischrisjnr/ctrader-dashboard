@@ -54,7 +54,7 @@
           <div class="row">
             <span class="pill" id="mon-state"></span>
             <button class="btn" id="mon-csv-all" hidden>Download all trade history (CSV)</button>
-            <button class="btn ghost small" id="mon-disconnect" hidden>Disconnect</button>
+            <button class="btn ghost small" id="mon-disconnect" hidden>Disconnect all</button>
           </div>
         </div>
 
@@ -90,6 +90,18 @@
 
         <section class="stats" id="mon-totals" aria-label="Totals"></section>
         <div class="mon-accounts" id="mon-accounts"></div>
+
+        <div class="card mon-logins" id="mon-logins" hidden>
+          <div class="section-head">
+            <div>
+              <h3>cTrader logins</h3>
+              <p class="muted">Have accounts on more than one cTrader ID? Add each login once. You don't need a new Open API app.</p>
+            </div>
+            <button class="btn primary" type="button" id="mon-add-login">+ Add another cTrader login</button>
+          </div>
+          <p class="hint">Before adding a different login, go to <a href="https://id.ctrader.com" target="_blank" rel="noopener">id.ctrader.com</a> and log out, otherwise cTrader reuses the login you're already signed in with.</p>
+          <ul class="login-list" id="mon-login-list"></ul>
+        </div>
       </section>
 
       <section data-panel="instances" hidden>

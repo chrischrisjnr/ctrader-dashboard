@@ -15,20 +15,26 @@ export function fakeData(now = Date.now()) {
     { ctidTraderAccountId: 101, traderLogin: 5123456, brokerTitleShort: 'IC Markets', isLive: false, balance: 1_012_345, deposit: 'USD' },
     { ctidTraderAccountId: 102, traderLogin: 3987001, brokerTitleShort: 'Pepperstone', isLive: false, balance: 498_210, deposit: 'EUR' },
     { ctidTraderAccountId: 900, traderLogin: 7777777, brokerTitleShort: 'Live Broker', isLive: true, balance: 100, deposit: 'USD' },
+    // Belongs to a second cTrader ID login.
+    { ctidTraderAccountId: 103, traderLogin: 9041647, brokerTitleShort: 'IC Markets', isLive: false, balance: 10_585_991, deposit: 'USD' },
   ];
+  const tokenAccounts = { 'access-1': [101, 102, 900], 'access-2': [103] };
   const positions = {
     101: [
       { positionId: 1, tradeData: { symbolId: 1, volume: 1_000_000, tradeSide: 1, openTimestamp: now - 3 * 3600_000, label: 'TrendFollower' }, price: 1.0841, pnl: 2450 },
       { positionId: 2, tradeData: { symbolId: 3, volume: 2_000_000, tradeSide: 2, openTimestamp: now - 5 * 3600_000, label: 'TrendFollower' }, price: 1.2712, pnl: -830 },
       { positionId: 3, tradeData: { symbolId: 2, volume: 1_000, tradeSide: 1, openTimestamp: now - 3600_000, label: 'GridScalper' }, price: 2391.4, pnl: 1220 },
     ],
+    103: [
+      { positionId: 5, tradeData: { symbolId: 2, volume: 2_000, tradeSide: 2, openTimestamp: now - 7200_000, label: 'GoldBot' }, price: 2401.2, pnl: 5310 },
+    ],
     102: [
       { positionId: 4, tradeData: { symbolId: 1, volume: 500_000, tradeSide: 2, openTimestamp: now - 2 * 3600_000, label: '' }, price: 1.0852, pnl: -410 },
     ],
   };
   // Closed trades spread over 60 days: an opening deal and a closing deal per position.
-  const deals = { 101: [], 102: [] };
-  const orders = { 101: [], 102: [] };
+  const deals = { 101: [], 102: [], 103: [] };
+  const orders = { 101: [], 102: [], 103: [] };
   let id = 1000;
   for (const acc of [101, 102]) {
     for (let i = 0; i < 40; i++) {
@@ -46,23 +52,27 @@ export function fakeData(now = Date.now()) {
   // One trade closed today.
   deals[101].push({ dealId: 77, orderId: 77, positionId: 77, symbolId: 2, filledVolume: 1000, tradeSide: 2, executionTimestamp: now - 60_000, executionPrice: 2400, dealStatus: 2, commission: -50, moneyDigits: 2,
     closePositionDetail: { entryPrice: 2390, grossProfit: 10_000, swap: 0, commission: -100, balance: 1_012_345, moneyDigits: 2 } });
-  return { symbols, accounts, positions, deals, orders, registeredAt: now - 90 * DAY };
+  return { symbols, accounts, tokenAccounts, positions, deals, orders, registeredAt: now - 90 * DAY };
 }
 
 export async function startFakeCtrader({ data = fakeData(), maxPerPage = 15 } = {}) {
   const log = [];
+  let logins = 0;
+  const codes = { 'good-code': 1, 'code-2': 2 };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     if (url.pathname === '/my/settings/openapi/grantingaccess/') {
-      res.writeHead(302, { Location: `${url.searchParams.get('redirect_uri')}?code=good-code` });
+      logins += 1;
+      res.writeHead(302, { Location: `${url.searchParams.get('redirect_uri')}?code=${logins === 1 ? 'good-code' : 'code-2'}` });
       return res.end();
     }
     if (url.pathname === '/apps/token') {
       const p = url.searchParams;
-      const ok = p.get('client_secret') === 'secret-123' && (p.get('code') === 'good-code' || p.get('refresh_token') === 'refresh-1');
+      const n = codes[p.get('code')] || { 'refresh-1': 1, 'refresh-2': 2 }[p.get('refresh_token')];
+      const ok = p.get('client_secret') === 'secret-123' && n;
       res.writeHead(ok ? 200 : 400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(ok
-        ? { accessToken: 'access-1', refreshToken: 'refresh-1', expiresIn: 2_628_000, tokenType: 'bearer' }
+        ? { accessToken: `access-${n}`, refreshToken: `refresh-${n}`, expiresIn: 2_628_000, tokenType: 'bearer' }
         : { errorCode: 'ACCESS_DENIED', description: 'Bad code' }));
     }
     res.writeHead(404).end();
@@ -81,8 +91,12 @@ export async function startFakeCtrader({ data = fakeData(), maxPerPage = 15 } = 
         case PT.APPLICATION_AUTH_REQ:
           return p.clientSecret === 'secret-123' ? reply(PT.APPLICATION_AUTH_RES, {}) : reply(PT.ERROR_RES, { errorCode: 'CH_CLIENT_AUTH_FAILURE', description: 'Bad app' });
         case PT.GET_ACCOUNTS_BY_ACCESS_TOKEN_REQ:
-          return reply(PT.GET_ACCOUNTS_BY_ACCESS_TOKEN_RES, { ctidTraderAccount: data.accounts.map(({ balance, deposit, ...a }) => a) });
+          if (!data.tokenAccounts[p.accessToken]) return reply(PT.ERROR_RES, { errorCode: 'CH_ACCESS_TOKEN_INVALID', description: 'Invalid access token' });
+          return reply(PT.GET_ACCOUNTS_BY_ACCESS_TOKEN_RES, {
+            ctidTraderAccount: data.accounts.filter((a) => data.tokenAccounts[p.accessToken].includes(a.ctidTraderAccountId)).map(({ balance, deposit, ...a }) => a),
+          });
         case PT.ACCOUNT_AUTH_REQ:
+          if (!data.tokenAccounts[p.accessToken]?.includes(p.ctidTraderAccountId)) return reply(PT.ERROR_RES, { errorCode: 'CH_ACCESS_TOKEN_INVALID', description: 'Wrong token for account' });
           return reply(PT.ACCOUNT_AUTH_RES, { ctidTraderAccountId: p.ctidTraderAccountId });
         case PT.ASSET_LIST_REQ:
           return reply(PT.ASSET_LIST_RES, { asset: [{ assetId: 1, name: 'USD', displayName: 'USD' }, { assetId: 2, name: 'EUR', displayName: 'EUR' }] });

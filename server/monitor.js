@@ -3,12 +3,14 @@ import fs from 'node:fs/promises';
 import { OpenApiClient, OpenApiError, PT } from './ctrader/client.js';
 import { authorizeUrl, exchangeCode, refreshTokens } from './ctrader/oauth.js';
 import { accountHistory, toCsv } from './history.js';
+import { newId } from './store.js';
 
 const PNL_POLL_MS = 5_000;
 const FULL_REFRESH_MS = 60_000;
 const REFRESH_TOKEN_BEFORE_MS = 3 * 24 * 3600_000;
 const LOGIN_WINDOW_MS = 10 * 60_000;
 const TOKEN_ERRORS = /TOKEN|ACCESS_DENIED|NOT_AUTHORIZED|UNAUTHORIZED/i;
+const RELOGIN_MESSAGE = 'cTrader asked this login to sign in again. Remove it and add it again.';
 
 const money = (value, digits) => (Number(value) || 0) / 10 ** digits;
 const isBuy = (side) => side === 1 || side === 'BUY';
@@ -22,7 +24,8 @@ function startOfToday() {
 /**
  * Read-only live view of the user's cTrader demo accounts through the official
  * cTrader Open API. Sees every position on the account, including ones opened
- * by cBots running in cTrader Desktop or cTrader Cloud. Emits 'update'.
+ * by cBots running in cTrader Desktop or cTrader Cloud. Supports several
+ * cTrader ID logins, each with its own access token. Emits 'update'.
  */
 export class Monitor extends EventEmitter {
   constructor({ file, config }) {
@@ -49,6 +52,13 @@ export class Monitor extends EventEmitter {
     } catch (err) {
       if (err.code !== 'ENOENT') throw err;
     }
+    // Older versions stored a single login's tokens at the top level.
+    if (this.settings.accessToken) {
+      const { accessToken, refreshToken, expiresAt, ...rest } = this.settings;
+      this.settings = { ...rest, logins: [{ id: newId(), accessToken, refreshToken, expiresAt }] };
+      await this.persist();
+    }
+    this.settings.logins ||= [];
     this.state = this.baseState();
   }
 
@@ -60,13 +70,15 @@ export class Monitor extends EventEmitter {
 
   baseState() {
     if (!this.settings.clientId || !this.settings.clientSecret) return 'not_configured';
-    if (!this.settings.accessToken) return 'needs_login';
+    if (!this.settings.logins?.length) return 'needs_login';
     return 'connecting';
   }
 
   async saveCredentials({ clientId, clientSecret }) {
     this.stop();
-    this.settings = { clientId, clientSecret };
+    // Tokens belong to the old app, so changing the app means logging in again.
+    this.settings = { clientId, clientSecret, logins: [] };
+    this.accounts.clear();
     await this.persist();
     this.setState(this.baseState(), null);
   }
@@ -89,22 +101,34 @@ export class Monitor extends EventEmitter {
       redirectUri,
       code,
     });
-    Object.assign(this.settings, tokens);
+    this.settings.logins.push({ id: newId(), ...tokens, addedAt: Date.now() });
     await this.persist();
+    this.start();
+  }
+
+  async removeLogin(loginId) {
+    const before = this.settings.logins.length;
+    this.settings.logins = this.settings.logins.filter((l) => l.id !== loginId);
+    if (this.settings.logins.length === before) throw new Error('Login not found.');
+    await this.persist();
+    for (const [id, acc] of this.accounts) if (acc.loginId === loginId) this.accounts.delete(id);
     this.start();
   }
 
   async disconnect() {
     this.stop();
-    const { clientId, clientSecret } = this.settings;
-    this.settings = { clientId, clientSecret };
+    this.settings.logins = [];
     await this.persist();
     this.accounts.clear();
     this.setState(this.baseState(), null);
   }
 
-  async refreshTokensIfNeeded(force = false) {
-    const { refreshToken, expiresAt } = this.settings;
+  login(loginId) {
+    return this.settings.logins.find((l) => l.id === loginId);
+  }
+
+  async refreshTokensIfNeeded(login, force = false) {
+    const { refreshToken, expiresAt } = login;
     if (!refreshToken || (!force && expiresAt - Date.now() > REFRESH_TOKEN_BEFORE_MS)) return;
     const tokens = await refreshTokens({
       tokenUrl: this.config.openApiTokenUrl,
@@ -112,8 +136,37 @@ export class Monitor extends EventEmitter {
       clientSecret: this.settings.clientSecret,
       refreshToken,
     });
-    Object.assign(this.settings, tokens);
+    Object.assign(login, tokens);
     await this.persist();
+  }
+
+  /** Logging in twice with the same cTrader ID keeps only the newest copy. */
+  async dropDuplicateLogins() {
+    const seen = new Set();
+    const keep = [];
+    for (const login of [...this.settings.logins].reverse()) {
+      const key = login.accountLogins?.length ? [...login.accountLogins].sort().join(',') : null;
+      if (key && seen.has(key)) continue;
+      if (key) seen.add(key);
+      keep.unshift(login);
+    }
+    if (keep.length !== this.settings.logins.length) {
+      this.settings.logins = keep;
+      await this.persist();
+    }
+  }
+
+  /** Lists one login's accounts, refreshing its token once if cTrader rejects it. */
+  async accountsForLogin(client, login) {
+    const list = () => client.request(PT.GET_ACCOUNTS_BY_ACCESS_TOKEN_REQ, { accessToken: login.accessToken });
+    try {
+      await this.refreshTokensIfNeeded(login);
+      return (await list()).ctidTraderAccount || [];
+    } catch (err) {
+      if (!(err instanceof OpenApiError && TOKEN_ERRORS.test(String(err.code)))) throw err;
+      await this.refreshTokensIfNeeded(login, true);
+      return (await list()).ctidTraderAccount || [];
+    }
   }
 
   // --- connection lifecycle -------------------------------------------------
@@ -142,7 +195,6 @@ export class Monitor extends EventEmitter {
     this.setState('connecting', null);
     let client;
     try {
-      await this.refreshTokensIfNeeded();
       client = new OpenApiClient(this.config.openApiUrl);
       await client.connect();
       if (this.stopped) return client.close();
@@ -154,11 +206,25 @@ export class Monitor extends EventEmitter {
         clientId: this.settings.clientId,
         clientSecret: this.settings.clientSecret,
       });
-      const { ctidTraderAccount = [] } = await client.request(PT.GET_ACCOUNTS_BY_ACCESS_TOKEN_REQ, {
-        accessToken: this.settings.accessToken,
-      });
-      const demo = ctidTraderAccount.filter((a) => !a.isLive);
-      this.hiddenLiveAccounts = ctidTraderAccount.length - demo.length;
+      // Each cTrader ID login has its own token; one connection serves them all.
+      const demo = [];
+      const liveIds = new Set();
+      for (const login of this.settings.logins) {
+        try {
+          const list = await this.accountsForLogin(client, login);
+          login.error = null;
+          login.accountLogins = list.filter((a) => !a.isLive).map((a) => a.traderLogin);
+          for (const a of list) {
+            if (a.isLive) liveIds.add(a.ctidTraderAccountId);
+            else if (!demo.some((d) => d.ctidTraderAccountId === a.ctidTraderAccountId)) demo.push({ ...a, loginId: login.id });
+          }
+        } catch (err) {
+          if (client.closed) throw err;
+          login.error = err instanceof OpenApiError || /login failed|Bad code|token/i.test(err.message) ? RELOGIN_MESSAGE : err.message;
+        }
+      }
+      this.hiddenLiveAccounts = liveIds.size;
+      await this.dropDuplicateLogins();
 
       const ids = new Set(demo.map((a) => String(a.ctidTraderAccountId)));
       for (const id of this.accounts.keys()) if (!ids.has(id)) this.accounts.delete(id);
@@ -168,6 +234,7 @@ export class Monitor extends EventEmitter {
         this.accounts.set(id, {
           ...(existing || { positions: [], symbols: new Map(), balance: 0, moneyDigits: 2, closedToday: { pnl: 0, count: 0 } }),
           id,
+          loginId: a.loginId,
           numericId: a.ctidTraderAccountId,
           login: a.traderLogin,
           broker: a.brokerTitleShort || '',
@@ -186,14 +253,8 @@ export class Monitor extends EventEmitter {
 
   async handleFailure(err) {
     if (this.stopped) return;
-    if (err instanceof OpenApiError && TOKEN_ERRORS.test(String(err.code))) {
-      try {
-        await this.refreshTokensIfNeeded(true);
-      } catch {
-        this.stop();
-        this.setState('needs_login', 'cTrader asked you to log in again.');
-        return;
-      }
+    if (err instanceof OpenApiError && /CLIENT_AUTH/i.test(String(err.code))) {
+      err.message = `cTrader rejected the app (${err.message}). Check that the app is Active and the Client ID/Secret are right.`;
     }
     this.scheduleReconnect(err.message);
   }
@@ -220,7 +281,7 @@ export class Monitor extends EventEmitter {
   async initAccount(acc) {
     const client = this.client;
     try {
-      await client.request(PT.ACCOUNT_AUTH_REQ, { ctidTraderAccountId: acc.numericId, accessToken: this.settings.accessToken });
+      await client.request(PT.ACCOUNT_AUTH_REQ, { ctidTraderAccountId: acc.numericId, accessToken: this.login(acc.loginId)?.accessToken });
       const [{ asset = [] }, { symbol = [] }] = await Promise.all([
         client.request(PT.ASSET_LIST_REQ, { ctidTraderAccountId: acc.numericId }),
         client.request(PT.SYMBOLS_LIST_REQ, { ctidTraderAccountId: acc.numericId }),
@@ -229,8 +290,7 @@ export class Monitor extends EventEmitter {
       acc.symbolNames = new Map(symbol.map((s) => [s.symbolId, s.symbolName]));
       await this.refreshAccount(acc);
     } catch (err) {
-      if (err instanceof OpenApiError && TOKEN_ERRORS.test(String(err.code))) throw err;
-      acc.error = err.message;
+      acc.error = err instanceof OpenApiError && TOKEN_ERRORS.test(String(err.code)) ? RELOGIN_MESSAGE : err.message;
       this.emitSoon();
     }
   }
@@ -343,14 +403,12 @@ export class Monitor extends EventEmitter {
       case PT.ACCOUNT_DISCONNECT_EVENT:
         if (acc) this.initAccount(acc).catch(() => {});
         break;
-      case PT.ACCOUNTS_TOKEN_INVALIDATED_EVENT:
-        this.refreshTokensIfNeeded(true)
-          .then(() => this.start())
-          .catch(() => {
-            this.stop();
-            this.setState('needs_login', 'cTrader asked you to log in again.');
-          });
+      case PT.ACCOUNTS_TOKEN_INVALIDATED_EVENT: {
+        const affected = new Set((p.ctidTraderAccountIds || []).map((id) => this.accounts.get(String(id))?.loginId).filter(Boolean));
+        Promise.allSettled(this.settings.logins.filter((l) => affected.has(l.id)).map((l) => this.refreshTokensIfNeeded(l, true)))
+          .then(() => this.start());
         break;
+      }
       case PT.CLIENT_DISCONNECT_EVENT:
         this.client?.close();
         break;
@@ -413,6 +471,7 @@ export class Monitor extends EventEmitter {
         }
         return {
           id: acc.id,
+          loginId: acc.loginId,
           login: acc.login,
           broker: acc.broker,
           currency: acc.currency || '',
@@ -433,6 +492,12 @@ export class Monitor extends EventEmitter {
       error: this.error,
       clientId: this.settings.clientId || '',
       hiddenLiveAccounts: this.hiddenLiveAccounts,
+      logins: this.settings.logins.map((l, i) => ({
+        id: l.id,
+        name: `Login ${i + 1}`,
+        accounts: l.accountLogins || [],
+        error: l.error || null,
+      })),
       accounts,
     };
   }

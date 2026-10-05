@@ -241,3 +241,11 @@ dialog.drawer[open] { display: flex; }
 .mon-account details[open] summary { margin-bottom: 8px; }
 .mon-empty { color: var(--muted); margin: 0; }
 .stat-value.small { font-size: 1.15rem; line-height: 1.5; }
+
+.mon-logins { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.mon-logins h3 { margin: 0; font-size: 1.05rem; }
+.mon-logins .section-head { margin-bottom: 0; }
+.mon-logins .hint a { color: var(--info); }
+.login-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.login-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--surface-2); border-radius: 8px; padding: 10px 12px; }
+.login-list .bot-error { margin: 4px 0 0; }

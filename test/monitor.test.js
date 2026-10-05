@@ -64,7 +64,7 @@ test('setup flow: credentials, login, then live account data', async (t) => {
   assert.equal(eur.side, 'Buy');
 
   const saved = JSON.parse(await fs.readFile(path.join(dir, 'openapi.json'), 'utf8'));
-  assert.equal(saved.accessToken, 'access-1');
+  assert.equal(saved.logins[0].accessToken, 'access-1');
   if (process.platform !== 'win32') assert.equal((await fs.stat(path.join(dir, 'openapi.json'))).mode & 0o777, 0o600);
 });
 
@@ -105,4 +105,41 @@ test('reconnects after the connection drops', async (t) => {
   monitor.client.ws.close();
   await waitFor(monitor, (s) => s.state === 'connected' && fake.log.filter((x) => x === 2100).length >= 2);
   assert.ok(monitor.client && !monitor.client.closed);
+});
+
+test('several cTrader ID logins show all their demo accounts', async (t) => {
+  const { monitor, dir } = await setup(t);
+  await connect(monitor);
+  monitor.beginLogin('x');
+  await monitor.finishLogin({ code: 'code-2', redirectUri: 'x' });
+  let snap = await waitFor(monitor, (s) => s.state === 'connected' && s.accounts.length === 3 && s.accounts.every((a) => a.updatedAt));
+  assert.equal(snap.logins.length, 2);
+  assert.deepEqual(snap.logins[1].accounts, [9041647]);
+  assert.equal(snap.accounts.find((a) => a.login === 9041647).bots[0].name, 'GoldBot');
+  assert.ok(!JSON.stringify(snap).includes('access-'), 'tokens never leave the server');
+
+  // Logging in again with the same cTrader ID does not duplicate it.
+  monitor.beginLogin('x');
+  await monitor.finishLogin({ code: 'code-2', redirectUri: 'x' });
+  snap = await waitFor(monitor, (s) => s.state === 'connected' && s.logins.length === 2 && s.accounts.length === 3);
+
+  await monitor.removeLogin(snap.logins[1].id);
+  snap = await waitFor(monitor, (s) => s.state === 'connected' && s.accounts.length === 2);
+  assert.ok(!snap.accounts.some((a) => a.login === 9041647));
+  const saved = JSON.parse(await fs.readFile(path.join(dir, 'openapi.json'), 'utf8'));
+  assert.equal(saved.logins.length, 1);
+});
+
+test('upgrades a single-login settings file from the previous version', async (t) => {
+  const fake = await startFakeCtrader();
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ctdash-mon-'));
+  const file = path.join(dir, 'openapi.json');
+  await fs.writeFile(file, JSON.stringify({ clientId: 'app-1', clientSecret: 'secret-123', accessToken: 'access-1', refreshToken: 'refresh-1', expiresAt: Date.now() + 1e9 }));
+  const monitor = new Monitor({ file, config: fake.config });
+  t.after(async () => { monitor.stop(); await fake.close(); await fs.rm(dir, { recursive: true, force: true }); });
+  await monitor.load();
+  monitor.start();
+  const snap = await waitFor(monitor, (s) => s.state === 'connected' && s.accounts.length === 2);
+  assert.equal(snap.logins.length, 1);
+  assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).accessToken, undefined);
 });

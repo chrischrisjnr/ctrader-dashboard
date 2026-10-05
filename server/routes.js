@@ -190,6 +190,15 @@ export function createApi({ store, manager, monitor, config, auth }) {
     }
   });
 
+  api.delete('/monitor/logins/:id', async (req, res) => {
+    try {
+      await monitor.removeLogin(req.params.id);
+    } catch (err) {
+      throw new HttpError(404, err.message);
+    }
+    res.json(monitor.snapshot());
+  });
+
   api.post('/monitor/disconnect', async (_req, res) => {
     await monitor.disconnect();
     res.json(monitor.snapshot());

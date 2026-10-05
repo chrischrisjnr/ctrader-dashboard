@@ -570,6 +570,16 @@ function renderMonitor() {
   error.hidden = !m.error;
   error.textContent = m.error || '';
 
+  const loginsCard = $('#mon-logins');
+  loginsCard.hidden = !live;
+  const logins = m.logins || [];
+  $('#mon-login-list').replaceChildren(...logins.map((l) => h('li', {},
+    h('div', {},
+      h('strong', {}, l.name),
+      h('span', { class: 'muted' }, l.accounts.length ? ` · demo accounts ${l.accounts.map((n) => `#${n}`).join(', ')}` : ' · no demo accounts found yet'),
+      l.error ? h('p', { class: 'bot-error' }, l.error) : null),
+    h('button', { class: 'btn small ghost', onclick: () => removeLogin(l) }, 'Remove'))));
+
   if (!live) {
     $('#mon-totals').replaceChildren();
     $('#mon-accounts').replaceChildren();
@@ -699,8 +709,22 @@ $('#mon-connect').addEventListener('click', async () => {
   if (result?.url) location.href = result.url;
 });
 
+async function removeLogin(login) {
+  if (!confirm(`Remove ${login.name}? Its accounts disappear from the Monitor. Your cBots keep running.`)) return;
+  const snapshot = await run(() => api(`/monitor/logins/${login.id}`, { method: 'DELETE' }), 'Login removed.');
+  if (snapshot) {
+    state.monitor = { ...state.monitor, ...snapshot };
+    renderMonitor();
+  }
+}
+
+$('#mon-add-login').addEventListener('click', async () => {
+  const result = await run(() => api('/monitor/connect', { method: 'POST' }));
+  if (result?.url) location.href = result.url;
+});
+
 $('#mon-disconnect').addEventListener('click', async () => {
-  if (!confirm('Disconnect the monitor from cTrader? Your cBots keep running; you can connect again any time.')) return;
+  if (!confirm('Disconnect all cTrader logins from the monitor? Your cBots keep running; you can connect again any time.')) return;
   const snapshot = await run(() => api('/monitor/disconnect', { method: 'POST' }));
   if (snapshot) {
     state.monitor = { ...state.monitor, ...snapshot };
@@ -736,7 +760,7 @@ async function boot() {
   const params = new URLSearchParams(location.search);
   if (params.has('monitor') || params.has('monitor_error')) {
     tab = 'monitor';
-    if (params.get('monitor') === 'connected') toast('cTrader connected. Loading your accounts…');
+    if (params.get('monitor') === 'connected') toast('cTrader login added. Loading its accounts…');
     if (params.get('monitor_error')) toast(`cTrader connection failed: ${params.get('monitor_error')}`, 'error');
     history.replaceState(null, '', location.pathname);
   }
