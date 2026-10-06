@@ -6,6 +6,7 @@ import { createAuth, sameOrigin } from './auth.js';
 import { config, isLoopback } from './config.js';
 import { Manager } from './manager.js';
 import { Monitor } from './monitor.js';
+import { networkUrls } from './network.js';
 import { createApi, createOAuthCallback } from './routes.js';
 import { DockerRunner } from './runners/docker.js';
 import { SimulationRunner } from './runners/simulation.js';
@@ -13,7 +14,22 @@ import { Store } from './store.js';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
+/** Used when running cBots from the dashboard is switched off (RUNNER=none). */
+class DisabledRunner {
+  name = 'none';
+  async start() {
+    throw new Error('Running cBots is switched off on this server.');
+  }
+  async stop() {}
+  async listContainers() {
+    return [];
+  }
+  attach() {}
+  async remove() {}
+}
+
 async function pickRunner() {
+  if (config.runner === 'none') return new DisabledRunner();
   if (config.runner === 'simulation') return new SimulationRunner();
   const dockerReady = await DockerRunner.isAvailable(config);
   if (dockerReady) return new DockerRunner(config);
@@ -29,7 +45,9 @@ async function main() {
     throw new Error(`Node.js ${process.versions.node} is too old. Install the current LTS version from https://nodejs.org (22 or newer).`);
   }
   if (!config.dashboardPassword && !isLoopback(config.host)) {
-    throw new Error('Set DASHBOARD_PASSWORD before making the dashboard reachable from other machines (HOST is not 127.0.0.1).');
+    throw new Error(config.hosted
+      ? 'Add a DASHBOARD_PASSWORD variable in Railway (service > Variables), then redeploy.'
+      : 'Set DASHBOARD_PASSWORD before making the dashboard reachable from other machines (HOST is not 127.0.0.1).');
   }
 
   await fs.mkdir(path.join(config.dataDir, 'bots'), { recursive: true });
@@ -47,7 +65,7 @@ async function main() {
   const auth = createAuth({ password: config.dashboardPassword });
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 'loopback');
+  app.set('trust proxy', config.trustProxy ? true : 'loopback');
   app.use((_req, res, next) => {
     res.set({
       'X-Content-Type-Options': 'nosniff',
@@ -59,12 +77,19 @@ async function main() {
   });
   app.use(express.json({ limit: '100kb' }));
   app.use('/api', sameOrigin, createApi({ store, manager, monitor, config, auth }));
-  app.get('/oauth/callback', createOAuthCallback({ monitor, auth }));
+  app.get('/oauth/callback', createOAuthCallback({ monitor, auth, config }));
   app.use(express.static(publicDir));
 
   const server = app.listen(config.port, config.host, (err) => {
     if (err) return; // reported by the 'error' handler below
     console.log(`cTrader dashboard running at http://${config.host}:${config.port} (runner: ${runner.name})`);
+    if (config.publicUrl) console.log(`Public address: ${config.publicUrl}`);
+    const urls = config.hosted ? [] : networkUrls(config.host, config.port);
+    if (urls.length) {
+      console.log('\nOpen it on your phone or iPad (same Wi-Fi, or Tailscale) at:');
+      for (const u of urls) console.log(`   ${u.url}${u.kind === 'tailscale' ? '   (Tailscale: works from anywhere)' : ''}`);
+      console.log('');
+    }
   });
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {

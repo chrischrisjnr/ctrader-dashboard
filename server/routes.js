@@ -3,6 +3,7 @@ import path from 'node:path';
 import express from 'express';
 import multer from 'multer';
 import { RANGES } from './equity.js';
+import { networkUrls } from './network.js';
 import { newId } from './store.js';
 import { HttpError, PERIODS, validateAccount, validateInstance } from './validation.js';
 
@@ -34,7 +35,15 @@ export function createApi({ store, manager, monitor, config, auth }) {
   api.use(auth.requireAuth);
 
   api.get('/status', (_req, res) => {
-    res.json({ runner: manager.runner.name, image: config.ctraderImage, periods: PERIODS });
+    res.json({
+      runner: manager.runner.name,
+      image: config.ctraderImage,
+      periods: PERIODS,
+      publicUrl: config.publicUrl,
+      network: config.hosted
+        ? { shared: true, urls: [] }
+        : { shared: networkUrls(config.host, config.port).length > 0, urls: networkUrls(config.host, config.port) },
+    });
   });
 
   // --- accounts --------------------------------------------------------------
@@ -171,7 +180,7 @@ export function createApi({ store, manager, monitor, config, auth }) {
   // --- account monitor (cTrader Open API, read-only) ---------------------------
 
   api.get('/monitor', (req, res) => {
-    res.json({ ...monitor.snapshot(), redirectUri: oauthRedirectUri(req) });
+    res.json({ ...monitor.snapshot(), redirectUri: oauthRedirectUri(req, config) });
   });
 
   api.post('/monitor/credentials', async (req, res) => {
@@ -185,7 +194,7 @@ export function createApi({ store, manager, monitor, config, auth }) {
 
   api.post('/monitor/connect', (req, res) => {
     try {
-      res.json({ url: monitor.beginLogin(oauthRedirectUri(req)) });
+      res.json({ url: monitor.beginLogin(oauthRedirectUri(req, config)) });
     } catch (err) {
       throw new HttpError(400, err.message);
     }
@@ -292,12 +301,12 @@ export function createApi({ store, manager, monitor, config, auth }) {
   return api;
 }
 
-export function oauthRedirectUri(req) {
-  return `${req.protocol}://${req.get('host')}/oauth/callback`;
+export function oauthRedirectUri(req, config = {}) {
+  return `${config.publicUrl || `${req.protocol}://${req.get('host')}`}/oauth/callback`;
 }
 
 /** Where cTrader sends the browser back after the user approves access. */
-export function createOAuthCallback({ monitor, auth }) {
+export function createOAuthCallback({ monitor, auth, config }) {
   return async (req, res) => {
     if (!auth.isAuthenticated(req)) return res.redirect('/');
     const code = typeof req.query.code === 'string' ? req.query.code : '';
@@ -306,7 +315,7 @@ export function createOAuthCallback({ monitor, auth }) {
       return res.redirect(`/?monitor_error=${encodeURIComponent(reason.slice(0, 200))}`);
     }
     try {
-      await monitor.finishLogin({ code, redirectUri: oauthRedirectUri(req) });
+      await monitor.finishLogin({ code, redirectUri: oauthRedirectUri(req, config) });
       res.redirect('/?monitor=connected');
     } catch (err) {
       res.redirect(`/?monitor_error=${encodeURIComponent(err.message.slice(0, 200))}`);

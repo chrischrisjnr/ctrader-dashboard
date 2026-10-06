@@ -40,6 +40,38 @@ the supported way to run cBots without the cTrader desktop app.
 Without Docker you'll see a yellow **Simulation mode** banner: bots only print practice
 lines and never touch cTrader. That's a safe way to learn the dashboard.
 
+## Run it 24/7 online (Railway): view it on your phone and iPad from anywhere
+
+Your computer can then be off. Railway's free plan gives $1 of credit a month, which this small
+dashboard may just fit into; if it runs out, Railway pauses it until next month and the
+Hobby plan ($5/month) removes the worry.
+
+1. Go to <https://railway.com> and **sign up with GitHub**.
+2. **New Project → Deploy from GitHub repo →** pick `ctrader-dashboard` (allow Railway to see it).
+3. Open the new service → **Variables → New Variable**: `DASHBOARD_PASSWORD` = a strong password.
+4. Right-click the service (or use the command palette) → **Attach Volume**, mount path `/data`.
+   This keeps your logins, account names and equity history across restarts.
+5. **Settings → Networking → Generate Domain**. You get an address like `https://something.up.railway.app`.
+6. In your cTrader Open API app (<https://openapi.ctrader.com/apps>) add a second **Redirect URI**:
+   `https://something.up.railway.app/oauth/callback` (the Monitor tab shows the exact one).
+7. Open your Railway address, log in, paste your Client ID and Secret, and click **Connect cTrader**
+   for each cTrader login.
+
+On iPhone/iPad, open the address in Safari, then Share → **Add to Home Screen** for an app icon.
+Railway redeploys automatically whenever the project on GitHub is updated.
+
+On Railway the "Run bots" tabs are hidden (your cBots run in cTrader Cloud). Settings used there:
+`DASHBOARD_PASSWORD` (required). Detected automatically: `PORT`, storage (`RAILWAY_VOLUME_MOUNT_PATH`),
+public address (`RAILWAY_PUBLIC_DOMAIN`), `TRUST_PROXY`, `RUNNER=none`.
+
+## Phone & iPad at home (without a server)
+
+Double-click **Start with phone access** (Mac or Windows) instead of the normal Start file. It asks once
+for a password, then shows an address like `http://192.168.1.20:3000` to open on your phone or iPad on
+the same Wi-Fi (also under the **Phone & iPad** button). Your computer must stay on; the Mac version keeps
+it from sleeping while the dashboard runs. Connecting a cTrader login from a phone needs that address
+added as a Redirect URI too, so it's easiest to add logins on the computer.
+
 ## Set up the Monitor
 
 The dashboard opens on the **Monitor** tab, which walks you through these steps:
@@ -157,8 +189,10 @@ If the dashboard itself restarts, it reconnects to bots that are still running a
 | `DASHBOARD_PASSWORD` | *(none)* | Login password. Required if `HOST` isn't `127.0.0.1`. |
 | `HOST` | `127.0.0.1` | `127.0.0.1` = only this computer can open the dashboard. `0.0.0.0` = other devices too. |
 | `PORT` | `3000` | Web port. |
-| `RUNNER` | `auto` | `auto`, `docker` (real cBots) or `simulation` (practice only). |
+| `RUNNER` | `auto` | `auto`, `docker` (real cBots), `simulation` (practice only) or `none` (hide the Run bots tabs). |
 | `DATA_DIR` | `./data` | Where accounts, cBot files and passwords are stored. |
+| `PUBLIC_URL` | *(auto on Railway)* | The dashboard's public address, used for cTrader's login redirect. |
+| `TRUST_PROXY` | *(auto on Railway)* | `true` when behind an HTTPS proxy / hosting platform. |
 | `CTRADER_IMAGE` | `ghcr.io/spotware/ctrader-console:latest` | cTrader CLI image version. |
 
 ## Security notes

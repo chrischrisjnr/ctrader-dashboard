@@ -6,6 +6,13 @@
   <meta name="color-scheme" content="dark light">
   <title>cBot Control</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="cBot Control">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0b1118">
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" type="module"></script>
 </head>
@@ -31,6 +38,7 @@
       </div>
       <div class="topbar-actions">
         <span class="conn" id="conn" title="Live connection"></span>
+        <button class="btn ghost small" id="devices-btn">Phone &amp; iPad</button>
         <button class="btn ghost" id="logout-btn" hidden>Log out</button>
       </div>
     </header>
@@ -100,6 +108,7 @@
             <button class="btn primary" type="button" id="mon-add-login">+ Add another cTrader login</button>
           </div>
           <p class="hint">Before adding a different login, go to <a href="https://id.ctrader.com" target="_blank" rel="noopener">id.ctrader.com</a> and log out, otherwise cTrader reuses the login you're already signed in with.</p>
+          <p class="hint">Your cTrader Open API app must list this Redirect URI: <code id="mon-login-redirect"></code></p>
           <ul class="login-list" id="mon-login-list"></ul>
         </div>
       </section>
@@ -228,6 +237,15 @@
         <button class="btn primary" value="save">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Phone & iPad -->
+  <dialog id="devices-dialog">
+    <div class="dialog-form">
+      <h2>Open on your phone or iPad</h2>
+      <div id="devices-body"></div>
+      <div class="dialog-actions"><button class="btn primary" type="button" id="devices-close">Done</button></div>
+    </div>
   </dialog>
 
   <!-- Logs drawer -->

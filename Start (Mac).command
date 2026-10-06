@@ -23,5 +23,6 @@ echo "The dashboard will open in your browser: http://127.0.0.1:3000"
 echo "Keep this window open while your bots run. Close it to stop the dashboard."
 echo
 (sleep 3 && open "http://127.0.0.1:3000") &
-node server/index.js
+# caffeinate stops the Mac from going to sleep while the dashboard runs.
+caffeinate -i node server/index.js
 read -r -p "Press Enter to close."

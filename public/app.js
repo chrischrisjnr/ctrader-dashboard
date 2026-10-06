@@ -563,6 +563,7 @@ function renderMonitor() {
   $('#mon-csv-all').hidden = m.state !== 'connected' || m.accounts.length < 2;
   $('#mon-redirect').textContent = m.redirectUri || `${location.origin}/oauth/callback`;
   $('#mon-connect').disabled = m.state === 'not_configured';
+  $('#mon-login-redirect').textContent = m.redirectUri || '';
   const credForm = $('#mon-cred-form');
   if (m.clientId && !credForm.clientId.value && document.activeElement?.form !== credForm) credForm.clientId.value = m.clientId;
 
@@ -1013,6 +1014,63 @@ $('#mon-disconnect').addEventListener('click', async () => {
   }
 });
 
+// --- Phone & iPad ------------------------------------------------------------------
+
+function copyRow(text) {
+  return h('span', { class: 'copy-row' },
+    h('code', {}, text),
+    h('button', {
+      class: 'btn small',
+      type: 'button',
+      onclick: async () => {
+        try { await navigator.clipboard.writeText(text); toast('Copied.'); } catch { toast('Select the address and copy it manually.', 'error'); }
+      },
+    }, 'Copy'));
+}
+
+function renderDevices() {
+  const net = state.status?.network || { shared: false, urls: [] };
+  const body = $('#devices-body');
+  if (state.status?.publicUrl) {
+    body.replaceChildren(
+      h('div', { class: 'url-list' }, h('span', { class: 'url-kind' }, 'From anywhere'), copyRow(state.status.publicUrl)),
+      h('ol', {},
+        h('li', {}, 'On your iPhone or iPad, open Safari and go to the address above.'),
+        h('li', {}, 'Log in with your dashboard password.'),
+        h('li', {}, 'Optional: tap the Share button, then ', h('strong', {}, 'Add to Home Screen'), ' to get an app icon.')),
+      h('p', { class: 'muted' }, 'The dashboard runs on your server around the clock, so your computer can be off.'));
+    return;
+  }
+  if (!net.shared) {
+    body.replaceChildren(
+      h('p', {}, 'Right now the dashboard only accepts this computer. To open it on your phone or iPad:'),
+      h('ol', {},
+        h('li', {}, 'Close the dashboard\'s black window.'),
+        h('li', {}, 'Double-click ', h('strong', {}, 'Start with phone access'), ' (Mac or Windows version) in the dashboard folder.'),
+        h('li', {}, 'Choose a password when asked. You\'ll type it once on each device.'),
+        h('li', {}, 'Click this button again to see the address to open.')),
+      h('p', { class: 'muted' }, 'To check it away from home, also install the free Tailscale app on this computer and your devices. See the README.'));
+    return;
+  }
+  const wifi = net.urls.filter((u) => u.kind === 'wifi');
+  const tail = net.urls.filter((u) => u.kind === 'tailscale');
+  body.replaceChildren(
+    tail.length ? h('div', { class: 'url-list' }, h('span', { class: 'url-kind' }, 'From anywhere (Tailscale)'), ...tail.map((u) => copyRow(u.url))) : null,
+    wifi.length ? h('div', { class: 'url-list' }, h('span', { class: 'url-kind' }, 'At home (same Wi-Fi)'), ...wifi.map((u) => copyRow(u.url))) : null,
+    h('ol', {},
+      h('li', {}, 'On your iPhone or iPad, open Safari and type the address above.'),
+      h('li', {}, 'Log in with the password you chose when starting with phone access.'),
+      h('li', {}, 'Optional: tap the Share button, then ', h('strong', {}, 'Add to Home Screen'), ' to get an app icon.')),
+    tail.length ? null : h('p', { class: 'muted' }, 'Away from home? Install the free Tailscale app on this computer and your devices (see the README), restart the dashboard, and a "from anywhere" address appears here.'),
+    h('p', { class: 'muted' }, 'This computer must stay on and the black window open.'));
+}
+
+$('#devices-btn').addEventListener('click', () => {
+  renderDevices();
+  $('#devices-dialog').showModal();
+});
+$('#devices-close').addEventListener('click', () => $('#devices-dialog').close());
+
 // --- Boot --------------------------------------------------------------------------
 
 async function boot() {
@@ -1030,6 +1088,10 @@ async function boot() {
 
   const simulated = status.runner === 'simulation';
   $('#sim-banner').hidden = !simulated;
+  // Running cBots from the dashboard can be switched off (e.g. on a hosted server).
+  const runnerOff = status.runner === 'none';
+  for (const tab of ['instances', 'accounts', 'bots']) $(`.tabs [data-tab="${tab}"]`).hidden = runnerOff;
+  if (runnerOff) $('.tabs').hidden = true;
   $('#logout-btn').hidden = !session.authRequired;
 
   $('#login-view').hidden = true;
@@ -1045,7 +1107,7 @@ async function boot() {
     if (params.get('monitor_error')) toast(`cTrader connection failed: ${params.get('monitor_error')}`, 'error');
     history.replaceState(null, '', location.pathname);
   }
-  selectTab(document.querySelector(`[data-tab="${tab}"]`) ? tab : 'monitor');
+  selectTab(document.querySelector(`[data-tab="${tab}"]:not([hidden])`) ? tab : 'monitor');
   renderAll();
   renderMonitor();
   connectEvents();

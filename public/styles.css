@@ -290,3 +290,25 @@ dialog.drawer[open] { display: flex; }
 .tooltip strong { font-variant-numeric: tabular-nums; }
 .tooltip .lbl { color: var(--muted); }
 .chart-note { font-size: 0.8rem; color: var(--muted); margin: 0; }
+
+/* Phone & iPad dialog */
+#devices-body { display: flex; flex-direction: column; gap: 12px; line-height: 1.55; }
+#devices-body p, #devices-body ol { margin: 0; }
+#devices-body ol { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+#devices-body a { color: var(--info); }
+.url-list { display: flex; flex-direction: column; gap: 8px; }
+.url-list .copy-row code { font-size: 1rem; }
+.url-kind { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+/* Respect the iPhone notch / home bar when opened from the home screen */
+.topbar { padding-top: max(12px, env(safe-area-inset-top)); }
+body { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Compact top bar on phones */
+.brand > span, .badge, .topbar-actions .btn { white-space: nowrap; }
+@media (max-width: 640px) {
+  .topbar { flex-wrap: wrap; row-gap: 8px; }
+  .brand { gap: 8px; }
+  .brand .badge { font-size: 0.65rem; }
+  .topbar-actions { gap: 8px; margin-left: auto; }
+  .topbar-actions .btn { padding: 5px 10px; font-size: 0.85rem; }
+}
