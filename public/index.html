@@ -214,6 +214,22 @@
     </form>
   </dialog>
 
+  <!-- Account name dialog (Monitor) -->
+  <dialog id="meta-dialog">
+    <form method="dialog" class="dialog-form" id="meta-form">
+      <h2>Name this account</h2>
+      <p class="muted" data-account></p>
+      <label>Name <input name="name" maxlength="60" placeholder="e.g. Gold scalper test"></label>
+      <label>Algorithm running on it <input name="algorithm" maxlength="120" placeholder="e.g. GridScalper v2 on XAUUSD M15"></label>
+      <p class="hint">Only saved in this dashboard, on your computer. Nothing changes in cTrader.</p>
+      <p class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn primary" value="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Logs drawer -->
   <dialog id="logs-dialog" class="drawer">
     <div class="drawer-head">

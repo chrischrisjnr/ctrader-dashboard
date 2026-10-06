@@ -609,6 +609,13 @@ function renderMonitor() {
     return;
   }
 
+  for (const [id, chart] of charts) {
+    if (!m.accounts.some((a) => a.id === id)) {
+      clearInterval(chart.timer);
+      chart.resize.disconnect();
+      charts.delete(id);
+    }
+  }
   const openDetails = new Set([...document.querySelectorAll('#mon-accounts details[open]')].map((d) => d.dataset.id));
   $('#mon-accounts').replaceChildren(...m.accounts.map((a) => {
     const cur = a.currency;
@@ -634,10 +641,19 @@ function renderMonitor() {
           h('td', {}, p.label || p.comment || '—'),
           h('td', { class: 'num' }, pnl(p.netPnl, cur)))))))) : null;
 
-    return h('article', { class: 'card mon-account' },
+    const chart = charts.get(a.id);
+    if (chart) chart.account = a;
+    return h('article', { class: 'card mon-account', dataset: { id: a.id } },
       h('header', {},
-        h('div', {}, h('h3', {}, `#${a.login}`), h('span', { class: 'muted' }, [a.broker, cur, 'Demo'].filter(Boolean).join(' · '))),
-        h('button', { class: 'btn small', onclick: (e) => downloadHistory(a.id, e.currentTarget) }, 'Download trade history (CSV)')),
+        h('div', {},
+          h('h3', {}, a.name || `#${a.login}`),
+          h('span', { class: 'muted' }, [a.name ? `#${a.login}` : null, a.broker, cur, 'Demo'].filter(Boolean).join(' · ')),
+          a.algorithm ? h('div', {}, h('span', { class: 'algo' }, a.algorithm)) : null),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn small ghost', onclick: () => openMetaDialog(a) }, a.name ? 'Rename' : 'Name it'),
+          h('button', { class: 'btn small', 'aria-expanded': String(Boolean(chart)), onclick: () => toggleChart(a) }, chart ? 'Hide chart' : 'Chart'),
+          h('button', { class: 'btn small', onclick: (e) => downloadHistory(a.id, e.currentTarget) }, 'Download trade history (CSV)'))),
+      chart ? chart.el : null,
       a.error ? h('p', { class: 'bot-error' }, a.error) : null,
       h('div', { class: 'metrics' },
         metric('Balance', fmtMoney(a.balance, cur)),
@@ -647,6 +663,271 @@ function renderMonitor() {
       bots,
       positions);
   }));
+}
+
+// --- Account names ----------------------------------------------------------------
+
+let editingMeta = null;
+
+function openMetaDialog(account) {
+  editingMeta = account;
+  const form = $('#meta-form');
+  resetForm(form);
+  $('[data-account]', form).textContent = `Account #${account.login}${account.broker ? ` · ${account.broker}` : ''}`;
+  form.name.value = account.name || '';
+  form.algorithm.value = account.algorithm || '';
+  $('#meta-dialog').showModal();
+}
+
+bindDialog($('#meta-dialog'), async (form) => {
+  const snapshot = await api(`/monitor/accounts/${editingMeta.id}/meta`, {
+    method: 'PUT',
+    body: { name: form.name.value, algorithm: form.algorithm.value },
+  });
+  state.monitor = { ...state.monitor, ...snapshot };
+  renderMonitor();
+  toast('Saved.');
+});
+
+// --- Balance & equity chart -----------------------------------------------------------
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const RANGE_LABELS = [['1d', '1D'], ['1w', '1W'], ['1m', '1M'], ['3m', '3M'], ['all', 'All']];
+const charts = new Map(); // account id -> chart state (kept across re-renders)
+
+function svg(tag, attrs = {}) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+function toggleChart(account) {
+  const existing = charts.get(account.id);
+  if (existing) {
+    clearInterval(existing.timer);
+    existing.resize.disconnect();
+    charts.delete(account.id);
+  } else {
+    charts.set(account.id, createChart(account));
+  }
+  renderMonitor();
+}
+
+function createChart(account) {
+  const c = { account, range: '1m', data: null, hover: null };
+  const plot = h('div', { class: 'chart-plot' });
+  const buttons = RANGE_LABELS.map(([key, label]) => h('button', {
+    type: 'button',
+    'aria-pressed': String(key === c.range),
+    onclick: () => {
+      c.range = key;
+      for (const b of buttons) b.setAttribute('aria-pressed', String(b === buttons[RANGE_LABELS.findIndex(([k]) => k === key)]));
+      loadChart(c);
+    },
+  }, label));
+  const note = h('p', { class: 'chart-note' });
+  c.el = h('div', { class: 'chart' },
+    h('div', { class: 'chart-top' },
+      h('div', { class: 'legend' },
+        h('span', {}, h('i', { class: 'key-balance' }), 'Balance'),
+        h('span', {}, h('i', { class: 'key-equity' }), 'Equity')),
+      h('div', { class: 'segmented', role: 'group', 'aria-label': 'Time range' }, buttons)),
+    plot,
+    note);
+  c.el.querySelector('.key-balance').style.borderColor = 'var(--series-balance)';
+  c.el.querySelector('.key-equity').style.borderColor = 'var(--series-equity)';
+  c.plot = plot;
+  c.note = note;
+  c.resize = new ResizeObserver(() => drawChart(c));
+  c.resize.observe(plot);
+  c.timer = setInterval(() => loadChart(c, true), 60_000);
+  loadChart(c);
+  return c;
+}
+
+async function loadChart(c, quiet = false) {
+  const range = c.range;
+  if (!quiet || !c.data) {
+    c.data = null;
+    c.message = 'Loading balance history from cTrader… The first time can take up to a minute.';
+    drawChart(c);
+  }
+  try {
+    const data = await api(`/monitor/accounts/${c.account.id}/chart?range=${range}`);
+    if (c.range !== range) return;
+    c.data = data;
+    c.message = null;
+  } catch (err) {
+    if (!quiet) c.message = err.message;
+  }
+  drawChart(c);
+}
+
+function niceStep(raw) {
+  const pow = 10 ** Math.floor(Math.log10(raw || 1));
+  const n = raw / pow;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * pow;
+}
+
+/** Value of a series at time t: step series hold their last value, others use the nearest point. */
+function valueAt(points, t, step) {
+  if (!points.length || t < points[0][0] - 1) return null;
+  let lo = 0;
+  let hi = points.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (points[mid][0] <= t) lo = mid; else hi = mid - 1;
+  }
+  if (step) return points[lo];
+  const next = points[lo + 1];
+  return next && next[0] - t < t - points[lo][0] ? next : points[lo];
+}
+
+function drawChart(c) {
+  const plot = c.plot;
+  const width = plot.clientWidth;
+  if (!width) return;
+  const height = plot.clientHeight;
+  const d = c.data;
+  if (!d) {
+    plot.replaceChildren(h('div', { class: 'chart-msg' }, c.message || ''));
+    return;
+  }
+
+  const cur = d.currency;
+  const since = d.equitySince ? new Date(d.equitySince).toLocaleDateString() : null;
+  c.note.textContent = since
+    ? `Balance comes from cTrader's trade history. Equity is recorded every 5 minutes while this dashboard is running (since ${since}).`
+    : 'Balance comes from cTrader\'s trade history. Equity is recorded every 5 minutes while this dashboard is running, so its line starts today and grows over time.';
+
+  const series = [
+    { key: 'balance', label: 'Balance', points: d.balance, step: true, color: 'var(--series-balance)' },
+    { key: 'equity', label: 'Equity', points: d.equity, step: false, color: 'var(--series-equity)' },
+  ];
+  const values = series.flatMap((s) => s.points.map((p) => p[1]));
+  if (!values.length) {
+    plot.replaceChildren(h('div', { class: 'chart-msg' }, 'No data for this period yet.'));
+    return;
+  }
+
+  const m = { top: 12, right: 64, bottom: 26, left: 64 };
+  const x0 = d.from;
+  const x1 = Math.max(d.to, x0 + 1);
+  let lo = Math.min(...values);
+  let hi = Math.max(...values);
+  if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
+  const step = niceStep((hi - lo) / 4);
+  lo = Math.floor(lo / step) * step;
+  hi = Math.ceil(hi / step) * step;
+  const X = (t) => m.left + ((t - x0) / (x1 - x0)) * (width - m.left - m.right);
+  const Y = (v) => m.top + (1 - (v - lo) / (hi - lo)) * (height - m.top - m.bottom);
+  const decimals = step < 1 ? 2 : 0;
+  const fmtAxis = (v) => new Intl.NumberFormat(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(v);
+
+  const root = svg('svg', { viewBox: `0 0 ${width} ${height}`, tabindex: '0', role: 'img', 'aria-label': `Balance and equity in ${cur || 'account currency'}. Use left and right arrow keys to read values.` });
+  const grid = svg('g', { class: 'grid' });
+  const axis = svg('g', { class: 'axis' });
+  for (let v = lo; v <= hi + step / 2; v += step) {
+    grid.append(svg('line', { x1: m.left, x2: width - m.right, y1: Y(v), y2: Y(v) }));
+    const label = svg('text', { x: m.left - 8, y: Y(v) + 4, 'text-anchor': 'end' });
+    label.textContent = fmtAxis(v);
+    axis.append(label);
+  }
+  const span = x1 - x0;
+  const ticks = Math.max(2, Math.min(6, Math.floor((width - m.left - m.right) / 110)));
+  for (let i = 0; i <= ticks; i++) {
+    const t = x0 + (span * i) / ticks;
+    const label = svg('text', { x: X(t), y: height - 6, 'text-anchor': i === 0 ? 'start' : i === ticks ? 'end' : 'middle' });
+    const date = new Date(t);
+    label.textContent = span <= 2 * 86_400_000
+      ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : span > 400 * 86_400_000
+        ? date.toLocaleDateString([], { month: 'short', year: 'numeric' })
+        : date.toLocaleDateString([], { day: 'numeric', month: 'short' });
+    axis.append(label);
+  }
+  root.append(grid, axis);
+
+  const ends = [];
+  for (const s of series) {
+    const pts = s.points;
+    if (!pts.length) continue;
+    let dPath = `M${X(pts[0][0])},${Y(pts[0][1])}`;
+    for (let i = 1; i < pts.length; i++) {
+      dPath += s.step ? `H${X(pts[i][0])}V${Y(pts[i][1])}` : `L${X(pts[i][0])},${Y(pts[i][1])}`;
+    }
+    const last = pts[pts.length - 1];
+    if (s.step) dPath += `H${X(x1)}`;
+    if (pts.length === 1) root.append(svg('circle', { cx: X(last[0]), cy: Y(last[1]), r: 4, fill: s.color, class: 'dot' }));
+    else root.append(svg('path', { d: dPath, class: 'series', stroke: s.color }));
+    ends.push({ y: Y(last[1]), label: s.label });
+  }
+  // Direct labels at the right end, nudged apart if they would overlap.
+  if (ends.length === 2 && Math.abs(ends[0].y - ends[1].y) < 14) {
+    const mid = (ends[0].y + ends[1].y) / 2;
+    const [upper, lower] = ends[0].y <= ends[1].y ? [ends[0], ends[1]] : [ends[1], ends[0]];
+    upper.y = mid - 7;
+    lower.y = mid + 7;
+  }
+  for (const e of ends) {
+    const t = svg('text', { x: width - m.right + 8, y: e.y + 4, class: 'end-label' });
+    t.textContent = e.label;
+    root.append(t);
+  }
+
+  // Hover / keyboard read-out: crosshair, a dot per series, one tooltip with every series.
+  const cross = svg('line', { class: 'crosshair', y1: m.top, y2: height - m.bottom, visibility: 'hidden' });
+  const dots = series.map((s) => svg('circle', { r: 4, fill: s.color, class: 'dot', visibility: 'hidden' }));
+  root.append(cross, ...dots);
+  const tip = h('div', { class: 'tooltip', hidden: true });
+
+  const show = (t) => {
+    t = Math.min(Math.max(t, x0), x1);
+    c.hover = t;
+    const x = X(t);
+    cross.setAttribute('x1', x);
+    cross.setAttribute('x2', x);
+    cross.setAttribute('visibility', 'visible');
+    const rows = [];
+    series.forEach((s, i) => {
+      const p = valueAt(s.points, t, s.step);
+      if (!p) { dots[i].setAttribute('visibility', 'hidden'); return; }
+      dots[i].setAttribute('cx', s.step ? x : X(p[0]));
+      dots[i].setAttribute('cy', Y(p[1]));
+      dots[i].setAttribute('visibility', 'visible');
+      const key = h('i');
+      key.style.borderColor = s.color;
+      rows.push(h('div', { class: 'row' }, key, h('strong', {}, fmtMoney(p[1], cur)), h('span', { class: 'lbl' }, s.label)));
+    });
+    tip.replaceChildren(h('div', { class: 'when' }, new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })), ...rows);
+    tip.hidden = false;
+    const left = x + 14 + tip.offsetWidth > width ? x - 14 - tip.offsetWidth : x + 14;
+    tip.style.left = `${Math.max(0, left)}px`;
+    tip.style.top = `${m.top}px`;
+  };
+  const hide = () => {
+    c.hover = null;
+    cross.setAttribute('visibility', 'hidden');
+    for (const dot of dots) dot.setAttribute('visibility', 'hidden');
+    tip.hidden = true;
+  };
+  const timeAtPointer = (event) => {
+    const box = root.getBoundingClientRect();
+    const px = ((event.clientX - box.left) / box.width) * width;
+    return x0 + ((px - m.left) / (width - m.left - m.right)) * (x1 - x0);
+  };
+  root.addEventListener('pointermove', (e) => show(timeAtPointer(e)));
+  root.addEventListener('pointerleave', hide);
+  root.addEventListener('blur', hide);
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const stepT = (x1 - x0) / 50;
+    show((c.hover ?? x1) + (e.key === 'ArrowLeft' ? -stepT : stepT));
+  });
+
+  plot.replaceChildren(root, tip);
+  if (c.hover !== null) show(c.hover);
 }
 
 async function downloadHistory(accountId, button) {

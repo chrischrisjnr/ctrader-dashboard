@@ -143,3 +143,32 @@ test('upgrades a single-login settings file from the previous version', async (t
   assert.equal(snap.logins.length, 1);
   assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).accessToken, undefined);
 });
+
+test('accounts can be named, and names reach the CSV', async (t) => {
+  const { monitor, dir } = await setup(t);
+  await connect(monitor);
+  await monitor.setAccountMeta('101', { name: 'Gold scalper test', algorithm: 'GridScalper v2' });
+  const snap = await waitFor(monitor, (s) => s.accounts.find((a) => a.id === '101')?.name === 'Gold scalper test');
+  assert.equal(snap.accounts.find((a) => a.id === '101').algorithm, 'GridScalper v2');
+  const csv = await monitor.exportHistoryCsv('101');
+  assert.ok(csv.split('\r\n')[1].includes(',Gold scalper test,GridScalper v2,'));
+  // Names survive a restart.
+  const again = new Monitor({ file: path.join(dir, 'openapi.json'), config: {} });
+  await again.load();
+  assert.equal(again.meta['101'].name, 'Gold scalper test');
+  await monitor.setAccountMeta('101', { name: '', algorithm: '' });
+  assert.equal(monitor.meta['101'], undefined);
+  await assert.rejects(monitor.setAccountMeta('999', { name: 'x', algorithm: '' }), /not found/);
+});
+
+test('chart data combines cTrader balance history with recorded equity', async (t) => {
+  const { monitor } = await setup(t);
+  await connect(monitor);
+  await new Promise((r) => setTimeout(r, 50)); // let the first equity sample land
+  const data = await monitor.chart('101', 'all');
+  assert.equal(data.currency, 'USD');
+  assert.ok(data.balance.length >= 40, 'balance history reaches back through closed trades');
+  assert.equal(data.balance.at(-1)[1], 10123.45);
+  assert.ok(data.equity.length >= 1);
+  assert.equal(data.equity.at(-1)[1], 10151.85);
+});

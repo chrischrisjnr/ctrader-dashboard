@@ -7,7 +7,7 @@ const FALLBACK_HISTORY_MS = 5 * 365 * 24 * 3600_000;
 const FILLED = new Set([2, 3, 'FILLED', 'PARTIALLY_FILLED']);
 
 export const CSV_COLUMNS = [
-  'Account', 'Broker', 'Currency', 'Time', 'Deal ID', 'Position ID', 'Order ID', 'Symbol',
+  'Account', 'Account name', 'Algorithm', 'Broker', 'Currency', 'Time', 'Deal ID', 'Position ID', 'Order ID', 'Symbol',
   'Direction', 'Action', 'Lots', 'Units', 'Price', 'Entry price', 'Gross profit', 'Swap',
   'Commission', 'Net profit', 'Balance after', 'cBot label', 'Comment',
 ];
@@ -15,6 +15,28 @@ export const CSV_COLUMNS = [
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const money = (value, digits) => (Number(value) || 0) / 10 ** digits;
 const round = (n, digits = 2) => (n === null || n === undefined ? '' : Number(n.toFixed(digits)));
+
+/** Spaces requests out to stay inside cTrader's historical-data rate limit. */
+export function throttled(rawRequest) {
+  let last = 0;
+  return async (type, payload) => {
+    const wait = last + HISTORICAL_GAP_MS - Date.now();
+    if (wait > 0) await sleep(wait);
+    last = Date.now();
+    return rawRequest(type, payload);
+  };
+}
+
+/** Fetches every deal of an account between two timestamps. */
+export async function fetchDeals(request, acc, from, to) {
+  const deals = [];
+  await fetchRange(request, PT.DEAL_LIST_REQ, 'deal', { ctidTraderAccountId: acc.numericId }, from, to, deals);
+  return deals;
+}
+
+export function accountStart(acc, now = Date.now()) {
+  return acc.registeredAt || now - FALLBACK_HISTORY_MS;
+}
 
 /** Fetches every item in [from, to], halving windows that report hasMore. */
 async function fetchRange(request, payloadType, listKey, base, from, to, out) {
@@ -40,20 +62,13 @@ async function fetchWindow(request, payloadType, listKey, base, from, to, out) {
  * @param {object} acc  monitor account ({ numericId, login, broker, currency, moneyDigits, registeredAt, symbols, symbolNames })
  */
 export async function accountHistory(rawRequest, acc, { now = Date.now(), onProgress } = {}) {
-  let last = 0;
-  const request = async (type, payload) => {
-    const wait = last + HISTORICAL_GAP_MS - Date.now();
-    if (wait > 0) await sleep(wait);
-    last = Date.now();
-    return rawRequest(type, payload);
-  };
+  const request = throttled(rawRequest);
   const base = { ctidTraderAccountId: acc.numericId };
-  const from = acc.registeredAt || now - FALLBACK_HISTORY_MS;
+  const from = accountStart(acc, now);
 
-  const deals = [];
   const orders = [];
   onProgress?.(`Loading deals for account ${acc.login}...`);
-  await fetchRange(request, PT.DEAL_LIST_REQ, 'deal', base, from, now, deals);
+  const deals = await fetchDeals(request, acc, from, now);
   onProgress?.(`Loading orders for account ${acc.login}...`);
   await fetchRange(request, PT.ORDER_LIST_REQ, 'order', base, from, now, orders);
 
@@ -87,6 +102,8 @@ export async function accountHistory(rawRequest, acc, { now = Date.now(), onProg
       const info = positionInfo.get(String(d.positionId)) || orderInfo.get(String(d.orderId)) || {};
       const row = {
         Account: acc.login,
+        'Account name': acc.meta?.name || '',
+        Algorithm: acc.meta?.algorithm || '',
         Broker: acc.broker,
         Currency: acc.currency,
         Time: new Date(d.executionTimestamp).toISOString(),

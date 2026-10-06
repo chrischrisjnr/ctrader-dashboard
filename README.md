@@ -59,7 +59,19 @@ The Monitor only asks cTrader for **read-only** access: it can't place, change o
 Only **demo** accounts are shown. "cBot (label)" is the label your cBot puts on its trades; trades without
 a label are grouped as "No label".
 
-**Trade history CSV** columns: account, time (UTC), deal/position/order IDs, symbol, buy/sell, open/close,
+**Name your accounts:** click **Name it** on an account to give it your own name and note which
+algorithm runs on it. Names are only stored in the dashboard (`DATA_DIR/account-names.json`) and
+appear in the CSV downloads too.
+
+**Balance & equity chart:** click **Chart** on an account. Choose 1D, 1W, 1M, 3M or All, and hover
+(or use the arrow keys) to read exact values.
+- *Balance* goes back to the day the account was opened: cTrader records the balance after every closed trade.
+- *Equity* (balance + open trades) is not stored by cTrader, so the dashboard records it every
+  5 minutes **while it is running**. Its line starts the first time you run this version and grows from there.
+
+![Chart](screenshot-chart.png)
+
+**Trade history CSV** columns: account, account name, algorithm, time (UTC), deal/position/order IDs, symbol, buy/sell, open/close,
 lots, units, price, entry price, gross profit, swap, commission, net profit, balance after, cBot label, comment.
 Large histories can take a minute to prepare.
 
@@ -170,6 +182,7 @@ server/
   index.js           app startup, security headers, runner selection
   monitor.js         read-only live account monitor (cTrader Open API)
   history.js         full trade history download -> CSV
+  equity.js          balance & equity curves (cTrader deal history + recorded equity samples)
   ctrader/           Open API JSON/WebSocket client and OAuth helpers
   config.js          settings from environment / .env
   routes.js          REST API + live updates (Server-Sent Events)

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import express from 'express';
 import multer from 'multer';
+import { RANGES } from './equity.js';
 import { newId } from './store.js';
 import { HttpError, PERIODS, validateAccount, validateInstance } from './validation.js';
 
@@ -197,6 +198,32 @@ export function createApi({ store, manager, monitor, config, auth }) {
       throw new HttpError(404, err.message);
     }
     res.json(monitor.snapshot());
+  });
+
+  api.put('/monitor/accounts/:id/meta', async (req, res) => {
+    const clean = (value, field, max) => {
+      const str = String(value ?? '').trim();
+      // eslint-disable-next-line no-control-regex
+      if (str.length > max || /[\u0000-\u001f\u007f]/.test(str)) throw new HttpError(400, `${field} must be at most ${max} characters.`);
+      return str;
+    };
+    const meta = { name: clean(req.body?.name, 'Name', 60), algorithm: clean(req.body?.algorithm, 'Algorithm', 120) };
+    try {
+      await monitor.setAccountMeta(req.params.id, meta);
+    } catch (err) {
+      throw new HttpError(404, err.message);
+    }
+    res.json(monitor.snapshot());
+  });
+
+  api.get('/monitor/accounts/:id/chart', async (req, res) => {
+    const range = String(req.query.range || '1m');
+    if (!RANGES[range]) throw new HttpError(400, 'Unknown time range.');
+    try {
+      res.json(await monitor.chart(req.params.id, range));
+    } catch (err) {
+      throw new HttpError(409, err.message);
+    }
   });
 
   api.post('/monitor/disconnect', async (_req, res) => {

@@ -1,17 +1,21 @@
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { OpenApiClient, OpenApiError, PT } from './ctrader/client.js';
 import { authorizeUrl, exchangeCode, refreshTokens } from './ctrader/oauth.js';
+import { EquityHistory } from './equity.js';
 import { accountHistory, toCsv } from './history.js';
 import { newId } from './store.js';
 
 const PNL_POLL_MS = 5_000;
 const FULL_REFRESH_MS = 60_000;
+const EQUITY_SAMPLE_MS = 5 * 60_000;
 const REFRESH_TOKEN_BEFORE_MS = 3 * 24 * 3600_000;
 const LOGIN_WINDOW_MS = 10 * 60_000;
 const TOKEN_ERRORS = /TOKEN|ACCESS_DENIED|NOT_AUTHORIZED|UNAUTHORIZED/i;
 const RELOGIN_MESSAGE = 'cTrader asked this login to sign in again. Remove it and add it again.';
 
+const round2 = (n) => Math.round(n * 100) / 100;
 const money = (value, digits) => (Number(value) || 0) / 10 ** digits;
 const isBuy = (side) => side === 1 || side === 'BUY';
 
@@ -32,6 +36,9 @@ export class Monitor extends EventEmitter {
     super();
     this.file = file;
     this.config = config;
+    this.metaFile = path.join(path.dirname(file), 'account-names.json');
+    this.meta = {}; // account id -> { name, algorithm }
+    this.history = new EquityHistory(path.join(path.dirname(file), 'history'));
     this.settings = {};
     this.state = 'not_configured';
     this.error = null;
@@ -59,6 +66,11 @@ export class Monitor extends EventEmitter {
       await this.persist();
     }
     this.settings.logins ||= [];
+    try {
+      this.meta = JSON.parse(await fs.readFile(this.metaFile, 'utf8'));
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
     this.state = this.baseState();
   }
 
@@ -104,6 +116,17 @@ export class Monitor extends EventEmitter {
     this.settings.logins.push({ id: newId(), ...tokens, addedAt: Date.now() });
     await this.persist();
     this.start();
+  }
+
+  /** Your own name and algorithm description for an account (stored only on this computer). */
+  async setAccountMeta(accountId, { name, algorithm }) {
+    if (!this.accounts.has(String(accountId)) && !this.meta[accountId]) throw new Error('Account not found.');
+    if (name || algorithm) this.meta[accountId] = { name, algorithm };
+    else delete this.meta[accountId];
+    const tmp = `${this.metaFile}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(this.meta, null, 2));
+    await fs.rename(tmp, this.metaFile);
+    this.emitSoon();
   }
 
   async removeLogin(loginId) {
@@ -245,6 +268,8 @@ export class Monitor extends EventEmitter {
       this.setState('connected', null);
       this.timers.push(setInterval(() => this.pollPnl(), PNL_POLL_MS));
       this.timers.push(setInterval(() => this.refreshAll(), FULL_REFRESH_MS));
+      this.timers.push(setInterval(() => this.recordEquity(), EQUITY_SAMPLE_MS));
+      this.recordEquity();
     } catch (err) {
       client?.close();
       await this.handleFailure(err);
@@ -416,6 +441,28 @@ export class Monitor extends EventEmitter {
     }
   }
 
+  // --- balance & equity curves ------------------------------------------------
+
+  equityOf(acc) {
+    return acc.balance + acc.positions.reduce((sum, p) => sum + p.netPnl, 0);
+  }
+
+  recordEquity() {
+    const now = Date.now();
+    for (const acc of this.accounts.values()) {
+      if (acc.error || !acc.updatedAt || now - acc.updatedAt > 2 * 60_000) continue;
+      this.history.record(acc.id, now, round2(acc.balance), round2(this.equityOf(acc))).catch(() => {});
+    }
+  }
+
+  async chart(accountId, range) {
+    if (this.state !== 'connected' || !this.client) throw new Error('Connect cTrader first.');
+    const acc = this.accounts.get(String(accountId));
+    if (!acc) throw new Error('Account not found.');
+    const client = this.client;
+    return this.history.chart({ ...acc, equity: this.equityOf(acc) }, (type, payload) => client.request(type, payload), range);
+  }
+
   // --- trade history export -------------------------------------------------
 
   /** @param {string} accountId  one account id, or 'all' */
@@ -430,6 +477,7 @@ export class Monitor extends EventEmitter {
       for (const acc of accounts) {
         const client = this.client;
         if (!client) throw new Error('Connection to cTrader lost. Try again in a moment.');
+        acc.meta = this.meta[acc.id];
         rows.push(...(await accountHistory((type, payload) => client.request(type, payload), acc)));
       }
       rows.sort((a, b) => a.Time.localeCompare(b.Time));
@@ -473,6 +521,8 @@ export class Monitor extends EventEmitter {
           id: acc.id,
           loginId: acc.loginId,
           login: acc.login,
+          name: this.meta[acc.id]?.name || '',
+          algorithm: this.meta[acc.id]?.algorithm || '',
           broker: acc.broker,
           currency: acc.currency || '',
           balance: acc.balance,
