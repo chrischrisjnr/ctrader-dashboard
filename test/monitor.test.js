@@ -114,8 +114,8 @@ test('several cTrader ID logins show all their demo accounts', async (t) => {
   await monitor.finishLogin({ code: 'code-2', redirectUri: 'x' });
   let snap = await waitFor(monitor, (s) => s.state === 'connected' && s.accounts.length === 3 && s.accounts.every((a) => a.updatedAt));
   assert.equal(snap.logins.length, 2);
-  assert.deepEqual(snap.logins[1].accounts, [9041647]);
-  assert.equal(snap.accounts.find((a) => a.login === 9041647).bots[0].name, 'GoldBot');
+  assert.deepEqual(snap.logins[1].accounts, [7001234]);
+  assert.equal(snap.accounts.find((a) => a.login === 7001234).bots[0].name, 'GoldBot');
   assert.ok(!JSON.stringify(snap).includes('access-'), 'tokens never leave the server');
 
   // Logging in again with the same cTrader ID does not duplicate it.
@@ -125,7 +125,7 @@ test('several cTrader ID logins show all their demo accounts', async (t) => {
 
   await monitor.removeLogin(snap.logins[1].id);
   snap = await waitFor(monitor, (s) => s.state === 'connected' && s.accounts.length === 2);
-  assert.ok(!snap.accounts.some((a) => a.login === 9041647));
+  assert.ok(!snap.accounts.some((a) => a.login === 7001234));
   const saved = JSON.parse(await fs.readFile(path.join(dir, 'openapi.json'), 'utf8'));
   assert.equal(saved.logins.length, 1);
 });

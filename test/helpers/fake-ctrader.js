@@ -16,7 +16,7 @@ export function fakeData(now = Date.now()) {
     { ctidTraderAccountId: 102, traderLogin: 3987001, brokerTitleShort: 'Pepperstone', isLive: false, balance: 498_210, deposit: 'EUR' },
     { ctidTraderAccountId: 900, traderLogin: 7777777, brokerTitleShort: 'Live Broker', isLive: true, balance: 100, deposit: 'USD' },
     // Belongs to a second cTrader ID login.
-    { ctidTraderAccountId: 103, traderLogin: 9041647, brokerTitleShort: 'IC Markets', isLive: false, balance: 10_585_991, deposit: 'USD' },
+    { ctidTraderAccountId: 103, traderLogin: 7001234, brokerTitleShort: 'IC Markets', isLive: false, balance: 10_250_000, deposit: 'USD' },
   ];
   const tokenAccounts = { 'access-1': [101, 102, 900], 'access-2': [103] };
   const positions = {
