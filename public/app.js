@@ -545,8 +545,25 @@ function pnl(value, currency) {
   return h('span', { class: value > 0 ? 'pos' : value < 0 ? 'neg' : '' }, sign + fmtMoney(value, currency));
 }
 
-function metric(label, value) {
-  return h('div', { class: 'metric' }, h('span', {}, label), h('span', {}, value));
+function metric(label, value, sub = null, title = null) {
+  return h('div', { class: 'metric', title },
+    h('span', {}, label),
+    h('span', {}, value),
+    sub !== null ? h('small', {}, sub) : null);
+}
+
+/** "+1.23%" in green/red, or a neutral dash when unknown. */
+function pctSpan(value, { signed = true, badWhenPositive = false } = {}) {
+  if (value === null || value === undefined) return h('span', { class: 'muted' }, '—');
+  const text = `${signed && value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+  const bad = badWhenPositive ? value > 0 : value < 0;
+  const good = !badWhenPositive && value > 0;
+  return h('span', { class: bad ? 'neg' : good ? 'pos' : '' }, text);
+}
+
+function drawdownSpan(value) {
+  if (value === null || value === undefined) return h('span', { class: 'muted' }, '—');
+  return h('span', { class: value > 0 ? 'neg' : '' }, value > 0 ? `−${value.toFixed(2)}%` : '0.00%');
 }
 
 function renderMonitor() {
@@ -644,6 +661,7 @@ function renderMonitor() {
 
     const chart = charts.get(a.id);
     if (chart) chart.account = a;
+    const perf = a.performance || {};
     return h('article', { class: 'card mon-account', dataset: { id: a.id } },
       h('header', {},
         h('div', {},
@@ -659,8 +677,15 @@ function renderMonitor() {
       h('div', { class: 'metrics' },
         metric('Balance', fmtMoney(a.balance, cur)),
         metric('Equity', fmtMoney(a.equity, cur)),
-        metric('Floating P&L', pnl(a.floating, cur)),
-        metric(`Closed today (${a.closedToday.count})`, pnl(a.closedToday.pnl, cur))),
+        metric('Floating P&L', pnl(a.floating, cur), pctSpan(perf.floatingPct)),
+        metric(`Closed today (${a.closedToday.count})`, pnl(a.closedToday.pnl, cur), pctSpan(perf.closedTodayPct))),
+      h('div', { class: 'metrics perf' },
+        metric('Growth (all time)', perf.growthPct === null ? h('span', { class: 'muted' }, 'Calculating…') : pctSpan(perf.growthPct),
+          null, 'Equity now compared with the starting balance when the account opened. Deposits and withdrawals are not separated out.'),
+        metric('Peak equity', perf.peakEquity === null ? h('span', { class: 'muted' }, '—') : fmtMoney(perf.peakEquity, cur),
+          perf.peakAt ? new Date(perf.peakAt).toLocaleDateString() : null, 'The highest the account has ever been.'),
+        metric('Drawdown now', drawdownSpan(perf.currentDrawdownPct), null, 'How far equity is below its highest point right now.'),
+        metric('Max drawdown', drawdownSpan(perf.maxDrawdownPct), null, 'The biggest fall from a high point to a low point, ever.')),
       bots,
       positions);
   }));
@@ -715,7 +740,7 @@ function toggleChart(account) {
 }
 
 function createChart(account) {
-  const c = { account, range: '1m', data: null, hover: null };
+  const c = { account, range: '1m', mode: 'value', data: null, hover: null };
   const plot = h('div', { class: 'chart-plot' });
   const buttons = RANGE_LABELS.map(([key, label]) => h('button', {
     type: 'button',
@@ -726,15 +751,30 @@ function createChart(account) {
       loadChart(c);
     },
   }, label));
+  const modeButtons = [['value', 'Value'], ['pct', '%']].map(([key, label]) => h('button', {
+    type: 'button',
+    'aria-pressed': String(key === c.mode),
+    title: key === 'pct' ? 'Show growth in % from the start of the period' : 'Show money values',
+    onclick: () => {
+      c.mode = key;
+      for (const b of modeButtons) b.setAttribute('aria-pressed', String(b.textContent === label));
+      drawChart(c);
+    },
+  }, label));
   const note = h('p', { class: 'chart-note' });
+  const statsRow = h('div', { class: 'chart-stats' });
   c.el = h('div', { class: 'chart' },
     h('div', { class: 'chart-top' },
       h('div', { class: 'legend' },
         h('span', {}, h('i', { class: 'key-balance' }), 'Balance'),
         h('span', {}, h('i', { class: 'key-equity' }), 'Equity')),
-      h('div', { class: 'segmented', role: 'group', 'aria-label': 'Time range' }, buttons)),
+      h('div', { class: 'row' },
+        h('div', { class: 'segmented', role: 'group', 'aria-label': 'Show as' }, modeButtons),
+        h('div', { class: 'segmented', role: 'group', 'aria-label': 'Time range' }, buttons))),
+    statsRow,
     plot,
     note);
+  c.statsRow = statsRow;
   c.el.querySelector('.key-balance').style.borderColor = 'var(--series-balance)';
   c.el.querySelector('.key-equity').style.borderColor = 'var(--series-equity)';
   c.plot = plot;
@@ -796,16 +836,34 @@ function drawChart(c) {
   }
 
   const cur = d.currency;
+  const st = d.stats;
+  const rangeName = { '1d': 'today', '1w': 'this week', '1m': 'this month', '3m': 'last 3 months', all: 'all time' }[c.range];
+  c.statsRow.replaceChildren(...(st ? [
+    h('div', { class: 'chip', title: `Change from the start of the period (${rangeName}).` }, h('span', {}, 'Growth'), pctSpan(st.growthPct)),
+    h('div', { class: 'chip', title: 'Highest value in this period.' }, h('span', {}, 'Peak'),
+      h('strong', {}, fmtMoney(st.peak.v, cur)), h('span', { class: 'muted' }, new Date(st.peak.t).toLocaleDateString())),
+    h('div', { class: 'chip', title: 'Biggest fall from a high to a low in this period.' }, h('span', {}, 'Max drawdown'), drawdownSpan(st.maxDrawdownPct)),
+    h('div', { class: 'chip', title: 'How far below the period\'s high it is now.' }, h('span', {}, 'From peak now'), drawdownSpan(st.currentDrawdownPct)),
+  ] : []));
+
+  // In % mode every value is shown as growth from the start of the period.
+  const base = st?.startValue;
+  const asPct = c.mode === 'pct' && base > 0;
+  const tf = (v) => (asPct ? (v / base - 1) * 100 : v);
   const since = d.equitySince ? new Date(d.equitySince).toLocaleDateString() : null;
   c.note.textContent = since
     ? `Balance comes from cTrader's trade history. Equity is recorded every 5 minutes while this dashboard is running (since ${since}).`
     : 'Balance comes from cTrader\'s trade history. Equity is recorded every 5 minutes while this dashboard is running, so its line starts today and grows over time.';
 
   const series = [
-    { key: 'balance', label: 'Balance', points: d.balance, step: true, color: 'var(--series-balance)' },
-    { key: 'equity', label: 'Equity', points: d.equity, step: false, color: 'var(--series-equity)' },
+    { key: 'balance', label: 'Balance', points: d.balance.map(([t, v]) => [t, tf(v)]), step: true, color: 'var(--series-balance)' },
+    { key: 'equity', label: 'Equity', points: d.equity.map(([t, v]) => [t, tf(v)]), step: false, color: 'var(--series-equity)' },
   ];
   const values = series.flatMap((s) => s.points.map((p) => p[1]));
+  if (st && values.length) {
+    values.push(tf(st.peak.v));
+    if (st.maxDrawdown) values.push(tf(st.maxDrawdown.trough.v));
+  }
   if (!values.length) {
     plot.replaceChildren(h('div', { class: 'chart-msg' }, 'No data for this period yet.'));
     return;
@@ -823,9 +881,10 @@ function drawChart(c) {
   const X = (t) => m.left + ((t - x0) / (x1 - x0)) * (width - m.left - m.right);
   const Y = (v) => m.top + (1 - (v - lo) / (hi - lo)) * (height - m.top - m.bottom);
   const decimals = step < 1 ? 2 : 0;
-  const fmtAxis = (v) => new Intl.NumberFormat(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(v);
+  const fmtNum = (v) => new Intl.NumberFormat(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(v);
+  const fmtAxis = (v) => (asPct ? `${fmtNum(v)}%` : fmtNum(v));
 
-  const root = svg('svg', { viewBox: `0 0 ${width} ${height}`, tabindex: '0', role: 'img', 'aria-label': `Balance and equity in ${cur || 'account currency'}. Use left and right arrow keys to read values.` });
+  const root = svg('svg', { viewBox: `0 0 ${width} ${height}`, tabindex: '0', role: 'img', 'aria-label': `Balance and equity ${asPct ? 'as % growth' : `in ${cur || 'account currency'}`}. Use left and right arrow keys to read values.` });
   const grid = svg('g', { class: 'grid' });
   const axis = svg('g', { class: 'axis' });
   for (let v = lo; v <= hi + step / 2; v += step) {
@@ -848,6 +907,30 @@ function drawChart(c) {
     axis.append(label);
   }
   root.append(grid, axis);
+
+  // Mark the worst drawdown (shaded from its high to its low) and the period's peak.
+  const marks = svg('g', { class: 'marks' });
+  const inRange = (t) => t >= x0 && t <= x1;
+  const markLabel = (x, y, text, below) => {
+    const label = svg('text', { x, y: below ? y + 16 : y - 9, 'text-anchor': x > width - m.right - 60 ? 'end' : x < m.left + 60 ? 'start' : 'middle', class: 'mark-label' });
+    label.textContent = text;
+    marks.append(label);
+  };
+  if (st?.maxDrawdown && st.maxDrawdownPct > 0) {
+    const { peak, trough } = st.maxDrawdown;
+    const xa = X(Math.max(peak.t, x0));
+    const xb = X(Math.min(trough.t, x1));
+    marks.append(svg('rect', { x: xa, y: m.top, width: Math.max(2, xb - xa), height: height - m.top - m.bottom, class: 'dd-band' }));
+    if (inRange(trough.t)) {
+      marks.append(svg('circle', { cx: X(trough.t), cy: Y(tf(trough.v)), r: 4, class: 'mark' }));
+      markLabel(X(trough.t), Y(tf(trough.v)), `Max drawdown −${st.maxDrawdownPct.toFixed(2)}%`, true);
+    }
+  }
+  if (st?.peak && inRange(st.peak.t)) {
+    marks.append(svg('circle', { cx: X(st.peak.t), cy: Y(tf(st.peak.v)), r: 4, class: 'mark' }));
+    markLabel(X(st.peak.t), Y(tf(st.peak.v)), 'Peak', false);
+  }
+  root.append(marks);
 
   const ends = [];
   for (const s of series) {
@@ -898,7 +981,8 @@ function drawChart(c) {
       dots[i].setAttribute('visibility', 'visible');
       const key = h('i');
       key.style.borderColor = s.color;
-      rows.push(h('div', { class: 'row' }, key, h('strong', {}, fmtMoney(p[1], cur)), h('span', { class: 'lbl' }, s.label)));
+      const shown = asPct ? `${p[1] > 0 ? '+' : ''}${p[1].toFixed(2)}%` : fmtMoney(p[1], cur);
+      rows.push(h('div', { class: 'row' }, key, h('strong', {}, shown), h('span', { class: 'lbl' }, s.label)));
     });
     tip.replaceChildren(h('div', { class: 'when' }, new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })), ...rows);
     tip.hidden = false;

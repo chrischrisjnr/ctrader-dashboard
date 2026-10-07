@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { downsample, EquityHistory } from '../server/equity.js';
+import { downsample, EquityHistory, performanceStats } from '../server/equity.js';
 
 test('downsample keeps the end point and extremes', () => {
   const pts = Array.from({ length: 5000 }, (_, i) => [i * 1000, Math.sin(i / 50) * 100 + (i === 2500 ? -900 : 0)]);
@@ -23,7 +23,7 @@ test('balance comes from closing deals, equity from samples, both clipped to the
   const day = 86_400_000;
   let calls = 0;
   const deals = [
-    { executionTimestamp: now - 40 * day, moneyDigits: 2, closePositionDetail: { balance: 100_000, moneyDigits: 2 } },
+    { executionTimestamp: now - 40 * day, moneyDigits: 2, closePositionDetail: { balance: 100_000, grossProfit: 2_500, swap: -100, commission: -400, moneyDigits: 2 } },
     { executionTimestamp: now - 20 * day, moneyDigits: 2 }, // opening deal: no balance
     { executionTimestamp: now - 10 * day, moneyDigits: 2, closePositionDetail: { balance: 105_000, moneyDigits: 2 } },
   ];
@@ -37,8 +37,15 @@ test('balance comes from closing deals, equity from samples, both clipped to the
   await eq.record('7', now - day, 1060, 1081);
 
   const all = await eq.chart(acc, request, 'all', now);
-  assert.deepEqual(all.balance.map((p) => p[1]), [1000, 1050, 1050, 1060, 1060]);
-  assert.deepEqual(all.balance[0], [now - 40 * day, 1000]);
+  // Starts at the opening deposit: 1000 after the first trade minus its +20 result.
+  assert.deepEqual(all.balance.map((p) => p[1]), [980, 1000, 1050, 1050, 1060, 1060]);
+  assert.deepEqual(all.balance[0], [now - 60 * day, 980]);
+  assert.equal(all.stats.startValue, 980);
+  // Performance uses balance before equity recording, then equity: 980 ... 1050 | 1040, 1081, 1072.5
+  assert.equal(all.stats.peak.v, 1081);
+  assert.equal(all.stats.growthPct, 9.44); // 1072.5 / 980 - 1
+  assert.equal(all.stats.maxDrawdownPct, 0.95); // 1050 -> 1040
+  assert.equal(all.stats.currentDrawdownPct, 0.79); // 1081 -> 1072.5
   assert.equal(all.balance.at(-1)[1], 1060);
   assert.deepEqual(all.equity, [[now - 2 * day, 1040], [now - day, 1081], [now, 1072.5]]);
   assert.equal(all.equitySince, now - 2 * day);
@@ -51,4 +58,17 @@ test('balance comes from closing deals, equity from samples, both clipped to the
   const before = calls;
   await eq.chart(acc, request, '1m', now + 1000);
   assert.ok(calls - before <= 1);
+});
+
+test('performance stats: growth, peak and drawdowns', () => {
+  const st = performanceStats([[1, 100], [2, 120], [3, 90], [4, 130], [5, 117]]);
+  assert.equal(st.growthPct, 17);
+  assert.deepEqual(st.peak, { t: 4, v: 130 });
+  assert.equal(st.maxDrawdownPct, 25); // 120 -> 90
+  assert.deepEqual(st.maxDrawdown, { peak: { t: 2, v: 120 }, trough: { t: 3, v: 90 } });
+  assert.equal(st.currentDrawdownPct, 10); // 130 -> 117
+  assert.equal(performanceStats([]), null);
+  const flat = performanceStats([[1, 50], [2, 50]]);
+  assert.equal(flat.maxDrawdownPct, 0);
+  assert.equal(flat.maxDrawdown, null);
 });

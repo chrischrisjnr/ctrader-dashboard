@@ -3,6 +3,7 @@ import path from 'node:path';
 import { accountStart, fetchDeals, throttled } from './history.js';
 
 const MAX_POINTS = 600;
+const CACHE_VERSION = 2;
 export const RANGES = { '1d': 86_400_000, '1w': 7 * 86_400_000, '1m': 30 * 86_400_000, '3m': 91 * 86_400_000, all: Infinity };
 
 const money = (value, digits) => (Number(value) || 0) / 10 ** digits;
@@ -51,25 +52,35 @@ export class EquityHistory {
     if (running) return running;
     const task = (async () => {
       const file = this.file(acc.id, 'balance.json');
-      let cache = { through: 0, points: [] };
+      let cache = { version: CACHE_VERSION, through: 0, start: null, points: [] };
       try {
-        cache = JSON.parse(await fs.readFile(file, 'utf8'));
+        const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+        if (saved.version === CACHE_VERSION) cache = saved; // older caches lack the starting balance: rebuild
       } catch (err) {
         if (err.code !== 'ENOENT') throw err;
       }
       const from = cache.through ? cache.through + 1 : accountStart(acc, now);
       const deals = await fetchDeals(throttled(rawRequest), acc, from, now);
       const seen = new Set(cache.points.map((p) => p[0]));
-      for (const d of deals) {
+      const closes = deals
+        .filter((d) => d.closePositionDetail?.balance !== undefined && !seen.has(d.executionTimestamp))
+        .sort((a, b) => a.executionTimestamp - b.executionTimestamp);
+      for (const d of closes) {
         const cpd = d.closePositionDetail;
-        if (!cpd || cpd.balance === undefined || seen.has(d.executionTimestamp)) continue;
-        cache.points.push([d.executionTimestamp, money(cpd.balance, cpd.moneyDigits ?? d.moneyDigits ?? acc.moneyDigits ?? 2)]);
+        const digits = cpd.moneyDigits ?? d.moneyDigits ?? acc.moneyDigits ?? 2;
+        const after = money(cpd.balance, digits);
+        if (cache.start === null && !cache.points.length) {
+          // Starting balance = balance after the first closed trade minus that trade's result.
+          const net = money((Number(cpd.grossProfit) || 0) + (Number(cpd.swap) || 0) + (Number(cpd.commission) || 0) + (Number(cpd.pnlConversionFee) || 0), digits);
+          cache.start = Math.round((after - net) * 100) / 100;
+        }
+        cache.points.push([d.executionTimestamp, after]);
       }
       cache.points.sort((a, b) => a[0] - b[0]);
       cache.through = now;
       await fs.mkdir(this.dir, { recursive: true });
       await fs.writeFile(file, JSON.stringify(cache));
-      return cache.points;
+      return cache;
     })().finally(() => this.loading.delete(acc.id));
     this.loading.set(acc.id, task);
     return task;
@@ -78,17 +89,27 @@ export class EquityHistory {
   /** Builds both curves for a time range, downsampled for drawing. */
   async chart(acc, rawRequest, range = 'all', now = Date.now()) {
     const span = RANGES[range] ?? Infinity;
-    const [dealPoints, samples] = await Promise.all([this.balancePoints(acc, rawRequest, now), this.samples(acc.id)]);
-    const balance = mergeByTime([...dealPoints, ...samples.map(([t, b]) => [t, b]), [now, acc.balance]]);
-    const equity = [...samples.map(([t, , e]) => [t, e]), [now, acc.equity]];
+    const [cache, samples] = await Promise.all([this.balancePoints(acc, rawRequest, now), this.samples(acc.id)]);
+    const dealPoints = cache.points;
+    // The account starts at its first deposit, just before the first closed trade.
+    const opening = cache.start !== null && dealPoints.length
+      ? [[Math.min(acc.registeredAt || dealPoints[0][0] - 1, dealPoints[0][0] - 1), cache.start]]
+      : [];
+    const balance = mergeByTime([...opening, ...dealPoints, ...samples.map(([t, b]) => [t, b]), [now, acc.balance]]);
+    const equity = mergeByTime([...samples.map(([t, , e]) => [t, e]), [now, acc.equity]]);
+    const equitySince = samples[0]?.[0] ?? null;
     const start = span === Infinity ? Math.min(balance[0]?.[0] ?? now, equity[0]?.[0] ?? now) : now - span;
+
+    // Performance is measured on equity where it was recorded, and on balance before that.
+    const performance = mergeByTime([...balance.filter((p) => equitySince === null || p[0] < equitySince), ...equity]);
     return {
       currency: acc.currency || '',
       from: start,
       to: now,
-      equitySince: samples[0]?.[0] ?? null,
+      equitySince,
       balance: downsample(clip(balance, start, true), MAX_POINTS, 'last'),
       equity: downsample(clip(equity, start, false), MAX_POINTS, 'minmax'),
+      stats: performanceStats(clip(performance, start, true)),
     };
   }
 }
@@ -138,4 +159,33 @@ export function downsample(points, max, mode) {
   const last = points[points.length - 1];
   if (out[out.length - 1] !== last) out.push(last);
   return mergeByTime(out);
+}
+
+/**
+ * Growth, peak and drawdowns of a value series (full resolution, oldest first).
+ * Drawdown = fall from the highest value reached so far, as a percentage of that high.
+ */
+export function performanceStats(points) {
+  if (!points.length) return null;
+  const [t0, startValue] = points[0];
+  const [, endValue] = points[points.length - 1];
+  let peak = { t: t0, v: startValue };
+  let runningPeak = peak;
+  let maxDd = { pct: 0, peak: null, trough: null };
+  for (const [t, v] of points) {
+    if (v > runningPeak.v) runningPeak = { t, v };
+    if (v > peak.v) peak = { t, v };
+    const dd = runningPeak.v > 0 ? (runningPeak.v - v) / runningPeak.v : 0;
+    if (dd > maxDd.pct) maxDd = { pct: dd, peak: runningPeak, trough: { t, v } };
+  }
+  const pct = (n) => Math.round(n * 10_000) / 100; // fraction -> percent with 2 decimals
+  return {
+    startValue,
+    endValue,
+    growthPct: startValue > 0 ? pct(endValue / startValue - 1) : null,
+    peak,
+    currentDrawdownPct: runningPeak.v > 0 ? pct((runningPeak.v - endValue) / runningPeak.v) : 0,
+    maxDrawdownPct: pct(maxDd.pct),
+    maxDrawdown: maxDd.peak ? { peak: maxDd.peak, trough: maxDd.trough } : null,
+  };
 }

@@ -101,6 +101,13 @@ appear in the CSV downloads too.
 - *Equity* (balance + open trades) is not stored by cTrader, so the dashboard records it every
   5 minutes **while it is running**. Its line starts the first time you run this version and grows from there.
 
+**Growth, peaks and drawdowns:** every account card shows growth since the account opened, peak equity,
+how far it is below that peak now, and its maximum drawdown (biggest fall from a high to a low).
+Floating P&L and today's closed P&L also show as % of balance. On the chart, the same figures are
+shown for the selected period, the peak and the worst drawdown are marked, and **%** switches the
+lines to % growth. Figures use equity where the dashboard has recorded it and balance before that;
+deposits and withdrawals are not separated out.
+
 ![Chart](screenshot-chart.png)
 
 **Trade history CSV** columns: account, account name, algorithm, time (UTC), deal/position/order IDs, symbol, buy/sell, open/close,

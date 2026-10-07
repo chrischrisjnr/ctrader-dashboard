@@ -242,7 +242,7 @@ dialog.drawer[open] { display: flex; }
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .metric { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
 .metric > span:first-child { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.metric > span:last-child { font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.metric > span:nth-child(2) { font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .mon-account .table-wrap { background: transparent; }
 .mon-account details summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
 .mon-account details[open] summary { margin-bottom: 8px; }
@@ -312,3 +312,14 @@ body { padding-bottom: env(safe-area-inset-bottom); }
   .topbar-actions { gap: 8px; margin-left: auto; }
   .topbar-actions .btn { padding: 5px 10px; font-size: 0.85rem; }
 }
+
+/* Growth, peaks and drawdowns */
+.metric small { font-size: 0.82rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); }
+.metrics.perf .metric { background: transparent; border: 1px solid var(--border); }
+.metrics.perf .metric > span:nth-child(2) { font-size: 1.05rem; }
+.chart-stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.chart-stats .chip { display: inline-flex; align-items: baseline; gap: 6px; background: var(--surface-2); border-radius: 8px; padding: 5px 10px; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.chart-stats .chip > span:first-child { color: var(--muted); }
+.chart-plot .dd-band { fill: var(--danger); opacity: 0.08; }
+.chart-plot .mark { fill: var(--surface); stroke: var(--text); stroke-width: 2; }
+.chart-plot .mark-label { fill: var(--text); font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }

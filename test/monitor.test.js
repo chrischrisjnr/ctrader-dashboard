@@ -172,3 +172,15 @@ test('chart data combines cTrader balance history with recorded equity', async (
   assert.ok(data.equity.length >= 1);
   assert.equal(data.equity.at(-1)[1], 10151.85);
 });
+
+test('account cards carry live growth and drawdown figures', async (t) => {
+  const { monitor } = await setup(t);
+  await connect(monitor);
+  const snap = await waitFor(monitor, (s) => s.accounts.find((a) => a.id === '101')?.performance?.growthPct !== null);
+  const perf = snap.accounts.find((a) => a.id === '101').performance;
+  assert.equal(perf.floatingPct, 0.28); // 28.40 on 10,123.45
+  assert.equal(perf.closedTodayPct, 0.99); // 99 on a 10,024.45 balance before it = 0.988%
+  assert.ok(perf.peakEquity >= 10151.85);
+  assert.ok(perf.maxDrawdownPct >= perf.currentDrawdownPct);
+  assert.equal(typeof perf.growthPct, 'number');
+});

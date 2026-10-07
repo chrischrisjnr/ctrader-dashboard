@@ -10,6 +10,7 @@ import { newId } from './store.js';
 const PNL_POLL_MS = 5_000;
 const FULL_REFRESH_MS = 60_000;
 const EQUITY_SAMPLE_MS = 5 * 60_000;
+const STATS_REFRESH_MS = 10 * 60_000;
 const REFRESH_TOKEN_BEFORE_MS = 3 * 24 * 3600_000;
 const LOGIN_WINDOW_MS = 10 * 60_000;
 const TOKEN_ERRORS = /TOKEN|ACCESS_DENIED|NOT_AUTHORIZED|UNAUTHORIZED/i;
@@ -39,6 +40,7 @@ export class Monitor extends EventEmitter {
     this.metaFile = path.join(path.dirname(file), 'account-names.json');
     this.meta = {}; // account id -> { name, algorithm }
     this.history = new EquityHistory(path.join(path.dirname(file), 'history'));
+    this.stats = new Map(); // account id -> all-time performance (start, peak, max drawdown)
     this.settings = {};
     this.state = 'not_configured';
     this.error = null;
@@ -269,7 +271,9 @@ export class Monitor extends EventEmitter {
       this.timers.push(setInterval(() => this.pollPnl(), PNL_POLL_MS));
       this.timers.push(setInterval(() => this.refreshAll(), FULL_REFRESH_MS));
       this.timers.push(setInterval(() => this.recordEquity(), EQUITY_SAMPLE_MS));
+      this.timers.push(setInterval(() => this.refreshStats(), STATS_REFRESH_MS));
       this.recordEquity();
+      this.refreshStats();
     } catch (err) {
       client?.close();
       await this.handleFailure(err);
@@ -455,6 +459,54 @@ export class Monitor extends EventEmitter {
     }
   }
 
+  /** All-time growth, peak and drawdown per account, refreshed in the background. */
+  async refreshStats() {
+    if (this.statsRunning) return;
+    this.statsRunning = true;
+    try {
+      for (const acc of [...this.accounts.values()]) {
+        if (acc.error || !this.client) continue;
+        try {
+          const data = await this.chart(acc.id, 'all');
+          if (data.stats) this.stats.set(acc.id, data.stats);
+          this.emitSoon();
+        } catch {
+          // Try again on the next round.
+        }
+      }
+    } finally {
+      this.statsRunning = false;
+    }
+  }
+
+  /** Combines stored all-time stats with the live equity so the numbers move in real time. */
+  livePerformance(acc, equity, floating) {
+    const pct = (n) => Math.round(n * 10_000) / 100;
+    const base = acc.balance > 0 ? acc.balance : null;
+    const closedBase = acc.balance - acc.closedToday.pnl;
+    const out = {
+      floatingPct: base ? pct(floating / base) : null,
+      closedTodayPct: closedBase > 0 ? pct(acc.closedToday.pnl / closedBase) : null,
+      growthPct: null,
+      peakEquity: null,
+      peakAt: null,
+      currentDrawdownPct: null,
+      maxDrawdownPct: null,
+    };
+    const st = this.stats.get(acc.id);
+    if (!st) return out;
+    const peak = equity > st.peak.v ? { t: Date.now(), v: equity } : st.peak;
+    const currentDd = peak.v > 0 ? (peak.v - equity) / peak.v : 0;
+    return {
+      ...out,
+      growthPct: st.startValue > 0 ? pct(equity / st.startValue - 1) : null,
+      peakEquity: peak.v,
+      peakAt: peak.t,
+      currentDrawdownPct: pct(currentDd),
+      maxDrawdownPct: Math.max(st.maxDrawdownPct, pct(currentDd)),
+    };
+  }
+
   async chart(accountId, range) {
     if (this.state !== 'connected' || !this.client) throw new Error('Connect cTrader first.');
     const acc = this.accounts.get(String(accountId));
@@ -528,6 +580,7 @@ export class Monitor extends EventEmitter {
           balance: acc.balance,
           equity: acc.balance + floating,
           floating,
+          performance: this.livePerformance(acc, acc.balance + floating, floating),
           closedToday: acc.closedToday,
           positions: acc.positions,
           bots: [...groups.values()]
