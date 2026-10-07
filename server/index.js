@@ -75,7 +75,9 @@ async function main() {
     });
     next();
   });
-  app.use(express.json({ limit: '100kb' }));
+  const smallJson = express.json({ limit: '100kb' });
+  // Backups can be large; that one route parses its own body with a higher limit.
+  app.use((req, res, next) => (req.path === '/api/monitor/restore' ? next() : smallJson(req, res, next)));
   app.use('/api', sameOrigin, createApi({ store, manager, monitor, config, auth }));
   app.get('/oauth/callback', createOAuthCallback({ monitor, auth, config }));
   app.use(express.static(publicDir));

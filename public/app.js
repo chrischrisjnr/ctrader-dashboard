@@ -1098,6 +1098,54 @@ $('#mon-disconnect').addEventListener('click', async () => {
   }
 });
 
+// --- Backup & restore ------------------------------------------------------------
+
+$('#mon-backup').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const res = await fetch('/api/monitor/backup');
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Backup failed.');
+    const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'cbot-control-backup.json';
+    const url = URL.createObjectURL(await res.blob());
+    const link = h('a', { href: url, download: name });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    toast('Backup downloaded. Keep it private.');
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+for (const button of document.querySelectorAll('.restore-btn')) {
+  button.addEventListener('click', () => $('#mon-restore-file').click());
+}
+
+$('#mon-restore-file').addEventListener('change', async (event) => {
+  const input = event.currentTarget;
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  let backup;
+  try {
+    backup = JSON.parse(await file.text());
+  } catch {
+    toast('That file is not a cBot Control backup.', 'error');
+    return;
+  }
+  if (!confirm(`Restore "${file.name}"? Its logins, account names and history are added to this dashboard.`)) return;
+  const result = await run(() => api('/monitor/restore', { method: 'POST', body: backup }));
+  if (result) {
+    state.monitor = { ...state.monitor, ...result.snapshot };
+    renderMonitor();
+    toast(`Restored ${result.logins} login(s), ${result.names} account name(s) and ${result.historyFiles} history file(s). Reconnecting…`);
+  }
+});
+
 // --- Phone & iPad ------------------------------------------------------------------
 
 function copyRow(text) {

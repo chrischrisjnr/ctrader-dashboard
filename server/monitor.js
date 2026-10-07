@@ -165,16 +165,24 @@ export class Monitor extends EventEmitter {
     await this.persist();
   }
 
-  /** Logging in twice with the same cTrader ID keeps only the newest copy. */
+  /**
+   * Logging in twice with the same cTrader ID (or restoring a backup) can leave two copies
+   * of one login. Keep one: a working copy beats one with an error, then the newest wins.
+   */
   async dropDuplicateLogins() {
-    const seen = new Set();
-    const keep = [];
-    for (const login of [...this.settings.logins].reverse()) {
+    const best = new Map(); // account set -> index of login to keep
+    this.settings.logins.forEach((login, i) => {
       const key = login.accountLogins?.length ? [...login.accountLogins].sort().join(',') : null;
-      if (key && seen.has(key)) continue;
-      if (key) seen.add(key);
-      keep.unshift(login);
-    }
+      if (!key) return;
+      const current = best.get(key);
+      if (current === undefined) return best.set(key, i);
+      const other = this.settings.logins[current];
+      if ((other.error && !login.error) || (!other.error === !login.error)) best.set(key, i);
+    });
+    const keep = this.settings.logins.filter((login, i) => {
+      const key = login.accountLogins?.length ? [...login.accountLogins].sort().join(',') : null;
+      return !key || best.get(key) === i;
+    });
     if (keep.length !== this.settings.logins.length) {
       this.settings.logins = keep;
       await this.persist();
@@ -537,6 +545,15 @@ export class Monitor extends EventEmitter {
     } finally {
       this.exporting = false;
     }
+  }
+
+  /** Reloads settings, names and logins from disk (after a backup was restored) and reconnects. */
+  async reload() {
+    this.stop();
+    this.accounts.clear();
+    this.stats.clear();
+    await this.load();
+    this.start();
   }
 
   // --- output ---------------------------------------------------------------

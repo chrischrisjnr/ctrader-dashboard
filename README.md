@@ -64,6 +64,13 @@ On Railway the "Run bots" tabs are hidden (your cBots run in cTrader Cloud). Set
 `DASHBOARD_PASSWORD` (required). Detected automatically: `PORT`, storage (`RAILWAY_VOLUME_MOUNT_PATH`),
 public address (`RAILWAY_PUBLIC_DOMAIN`), `TRUST_PROXY`, `RUNNER=none`.
 
+## Moving to another computer or server (backup & restore)
+
+On the Monitor tab, under **cTrader logins**, click **Download backup**. On the new dashboard (for example
+your Railway one) click **Restore from backup** (also on the first setup screen) and pick that file.
+It brings over your Open API app, every cTrader login, account names and recorded equity history, and
+merges with anything already there. Keep backup files private: they give read-only access to your accounts.
+
 ## Phone & iPad at home (without a server)
 
 Double-click **Start with phone access** (Mac or Windows) instead of the normal Start file. It asks once
@@ -224,6 +231,7 @@ server/
   monitor.js         read-only live account monitor (cTrader Open API)
   history.js         full trade history download -> CSV
   equity.js          balance & equity curves (cTrader deal history + recorded equity samples)
+  backup.js          backup & restore of logins, names and history
   ctrader/           Open API JSON/WebSocket client and OAuth helpers
   config.js          settings from environment / .env
   routes.js          REST API + live updates (Server-Sent Events)

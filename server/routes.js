@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import express from 'express';
 import multer from 'multer';
+import { createBackup, restoreBackup } from './backup.js';
 import { RANGES } from './equity.js';
 import { networkUrls } from './network.js';
 import { newId } from './store.js';
@@ -233,6 +234,30 @@ export function createApi({ store, manager, monitor, config, auth }) {
     } catch (err) {
       throw new HttpError(409, err.message);
     }
+  });
+
+  // --- backup & restore (move to another computer or server) -----------------
+
+  api.get('/monitor/backup', async (_req, res) => {
+    const backup = await createBackup(config.dataDir);
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.set({
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="cbot-control-backup-${stamp}.json"`,
+      'Cache-Control': 'no-store',
+    });
+    res.send(JSON.stringify(backup));
+  });
+
+  api.post('/monitor/restore', express.json({ limit: '60mb' }), async (req, res) => {
+    let result;
+    try {
+      result = await restoreBackup(config.dataDir, req.body);
+    } catch (err) {
+      throw new HttpError(400, err.message);
+    }
+    await monitor.reload();
+    res.json({ ...result, snapshot: monitor.snapshot() });
   });
 
   api.post('/monitor/disconnect', async (_req, res) => {

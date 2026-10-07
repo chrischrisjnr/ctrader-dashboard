@@ -70,6 +70,7 @@
 
         <div class="card setup" id="mon-setup" hidden>
           <h3>Connect your cTrader accounts (one-time setup, about 5 minutes)</h3>
+          <p class="restore-line">Already set up on another computer? <button class="btn small restore-btn" type="button">Restore from backup</button></p>
           <ol class="steps">
             <li>
               <strong>Create a free cTrader Open API app.</strong>
@@ -110,6 +111,16 @@
           <p class="hint">Before adding a different login, go to <a href="https://id.ctrader.com" target="_blank" rel="noopener">id.ctrader.com</a> and log out, otherwise cTrader reuses the login you're already signed in with.</p>
           <p class="hint">Your cTrader Open API app must list this Redirect URI: <code id="mon-login-redirect"></code></p>
           <ul class="login-list" id="mon-login-list"></ul>
+          <div class="backup-row">
+            <div>
+              <strong>Moving to another computer or server?</strong>
+              <p class="hint">A backup holds your cTrader logins, account names and equity history. Keep the file private: it gives read-only access to your accounts.</p>
+            </div>
+            <div class="row">
+              <button class="btn" type="button" id="mon-backup">Download backup</button>
+              <button class="btn restore-btn" type="button">Restore from backup</button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -263,6 +274,7 @@
     <pre class="logs" id="logs-body"></pre>
   </dialog>
 
+  <input type="file" id="mon-restore-file" accept=".json,application/json" hidden>
   <div class="toasts" id="toasts" aria-live="polite"></div>
 </body>
 </html>
