@@ -218,3 +218,19 @@ test('a failing figures calculation is reported instead of "Calculating…" fore
   assert.equal(acc.performance.growthPct, null);
   void fake;
 });
+
+test('stays within cTrader\'s history rate limit, so figures calculate for every account', async (t) => {
+  const fake = await startFakeCtrader({ rateLimit: true });
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ctdash-rl-'));
+  const monitor = new Monitor({ file: path.join(dir, 'openapi.json'), config: fake.config });
+  t.after(async () => { monitor.stop(); await fake.close(); await fs.rm(dir, { recursive: true, force: true }); });
+  await monitor.load();
+  await connect(monitor);
+  monitor.beginLogin('x');
+  await monitor.finishLogin({ code: 'code-2', redirectUri: 'x' });
+  // Meanwhile the regular refresh also reads today's deals for every account at once.
+  monitor.refreshAll();
+  const snap = await waitFor(monitor, (s) => s.accounts.length === 3 && s.accounts.every((a) => a.performance?.trades), 30000);
+  assert.ok(snap.accounts.every((a) => !a.performance.statsError));
+  assert.ok(!fake.log.includes('rate-limited'), 'never went over the limit');
+});

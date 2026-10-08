@@ -56,7 +56,7 @@ export function fakeData(now = Date.now()) {
   return { symbols, accounts, tokenAccounts, positions, deals, orders, registeredAt: now - 90 * DAY };
 }
 
-export async function startFakeCtrader({ data = fakeData(), maxPerPage = 15 } = {}) {
+export async function startFakeCtrader({ data = fakeData(), maxPerPage = 15, rateLimit = false } = {}) {
   const log = [];
   let logins = 0;
   const codes = { 'good-code': 1, 'code-2': 2 };
@@ -80,9 +80,19 @@ export async function startFakeCtrader({ data = fakeData(), maxPerPage = 15 } = 
   });
   const wss = new WebSocketServer({ server });
   wss.on('connection', (ws) => {
+    const historyTimes = []; // like cTrader: at most 5 history requests per second per connection
     ws.on('message', (raw) => {
       const msg = JSON.parse(raw);
       log.push(msg.payloadType);
+      if (rateLimit && (msg.payloadType === PT.DEAL_LIST_REQ || msg.payloadType === PT.ORDER_LIST_REQ)) {
+        const now = Date.now();
+        while (historyTimes.length && now - historyTimes[0] > 1000) historyTimes.shift();
+        if (historyTimes.length >= 5) {
+          log.push('rate-limited');
+          return ws.send(JSON.stringify({ clientMsgId: msg.clientMsgId, payloadType: PT.ERROR_RES, payload: { errorCode: 'REQUEST_FREQUENCY_EXCEEDED', description: 'You are being rate limited' } }));
+        }
+        historyTimes.push(now);
+      }
       const p = msg.payload || {};
       const reply = (payloadType, payload) => ws.send(JSON.stringify({ clientMsgId: msg.clientMsgId, payloadType, payload }));
       const acc = data.accounts.find((a) => a.ctidTraderAccountId === p.ctidTraderAccountId);

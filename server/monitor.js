@@ -216,6 +216,8 @@ export class Monitor extends EventEmitter {
 
   stop() {
     this.stopped = true;
+    clearTimeout(this.statsRetryTimer);
+    this.statsRetryTimer = null;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     clearTimeout(this.retryTimer);
@@ -496,7 +498,18 @@ export class Monitor extends EventEmitter {
     } finally {
       this.statsRunning = false;
     }
-    if (this.statsAgain) await this.refreshStats();
+    if (this.statsAgain) {
+      await this.refreshStats();
+      return;
+    }
+    // Accounts that failed (e.g. cTrader was busy) are retried after a minute, not 10.
+    const failed = [...this.accounts.values()].some((a) => a.statsError && !this.stats.has(a.id));
+    if (failed && !this.statsRetryTimer && !this.stopped) {
+      this.statsRetryTimer = setTimeout(() => {
+        this.statsRetryTimer = null;
+        this.refreshStats();
+      }, 60_000);
+    }
   }
 
   /** Combines stored all-time stats with the live equity so the numbers move in real time. */

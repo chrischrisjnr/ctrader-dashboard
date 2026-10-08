@@ -2,7 +2,6 @@ import { PT } from './ctrader/client.js';
 
 const WINDOW_MS = 30 * 24 * 3600_000;
 const MIN_WINDOW_MS = 60_000;
-const HISTORICAL_GAP_MS = 250; // cTrader allows ~5 historical requests per second
 const FALLBACK_HISTORY_MS = 5 * 365 * 24 * 3600_000;
 const FILLED = new Set([2, 3, 'FILLED', 'PARTIALLY_FILLED']);
 
@@ -12,19 +11,13 @@ export const CSV_COLUMNS = [
   'Commission', 'Net profit', 'Balance after', 'cBot label', 'Comment',
 ];
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const money = (value, digits) => (Number(value) || 0) / 10 ** digits;
 const round = (n, digits = 2) => (n === null || n === undefined ? '' : Number(n.toFixed(digits)));
 
 /** Spaces requests out to stay inside cTrader's historical-data rate limit. */
 export function throttled(rawRequest) {
-  let last = 0;
-  return async (type, payload) => {
-    const wait = last + HISTORICAL_GAP_MS - Date.now();
-    if (wait > 0) await sleep(wait);
-    last = Date.now();
-    return rawRequest(type, payload);
-  };
+  // Pacing is done by the connection's shared queue (see ctrader/client.js); nothing extra here.
+  return rawRequest;
 }
 
 /** Fetches every deal of an account between two timestamps. */

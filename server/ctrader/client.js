@@ -35,6 +35,19 @@ export const PT = Object.freeze({
   ORDER_LIST_RES: 2176,
 });
 
+// cTrader limits each connection to about 50 requests/second, and 5/second for history
+// requests. All requests go through one queue that stays safely under both limits.
+const HISTORICAL = new Set([PT.DEAL_LIST_REQ, PT.ORDER_LIST_REQ]);
+const GAP_MS = 30; // ~33 requests per second
+const HISTORICAL_GAP_MS = 300; // ~3.3 history requests per second
+const RATE_LIMIT_RETRIES = 6;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export function isRateLimited(err) {
+  return /FREQUENCY|RATE.?LIMIT|TOO_MANY/i.test(String(err?.code || '')) || /rate limit|too many requests/i.test(String(err?.message || ''));
+}
+
 export class OpenApiError extends Error {
   constructor(code, message) {
     super(message || code);
@@ -47,8 +60,13 @@ export class OpenApiError extends Error {
  * heartbeats, and unsolicited events emitted as 'message'. Emits 'close' once.
  */
 export class OpenApiClient extends EventEmitter {
-  constructor(url, { requestTimeoutMs = 20_000, heartbeatMs = 10_000 } = {}) {
+  constructor(url, { requestTimeoutMs = 20_000, heartbeatMs = 10_000, gapMs = GAP_MS, historicalGapMs = HISTORICAL_GAP_MS, retryBaseMs = 1_000 } = {}) {
     super();
+    this.gapMs = gapMs;
+    this.historicalGapMs = historicalGapMs;
+    this.retryBaseMs = retryBaseMs;
+    this.nextSlot = 0;
+    this.nextHistoricalSlot = 0;
     this.url = url;
     this.requestTimeoutMs = requestTimeoutMs;
     this.heartbeatMs = heartbeatMs;
@@ -114,7 +132,30 @@ export class OpenApiClient extends EventEmitter {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 
-  request(payloadType, payload = {}) {
+  /** Sends a request through the rate-limited queue, retrying if cTrader still says "rate limited". */
+  async request(payloadType, payload = {}) {
+    for (let attempt = 0; ; attempt++) {
+      await this.waitForSlot(HISTORICAL.has(payloadType));
+      try {
+        return await this.sendRequest(payloadType, payload);
+      } catch (err) {
+        if (!isRateLimited(err) || attempt >= RATE_LIMIT_RETRIES || this.closed) throw err;
+        await sleep(this.retryBaseMs * 2 ** attempt); // 1s, 2s, 4s, ...
+      }
+    }
+  }
+
+  /** Reserves the next free send time (shared by every caller on this connection). */
+  async waitForSlot(historical) {
+    const now = Date.now();
+    let at = Math.max(now, this.nextSlot);
+    if (historical) at = Math.max(at, this.nextHistoricalSlot);
+    this.nextSlot = at + this.gapMs;
+    if (historical) this.nextHistoricalSlot = at + this.historicalGapMs;
+    if (at > now) await sleep(at - now);
+  }
+
+  sendRequest(payloadType, payload) {
     if (this.closed || this.ws?.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error('Not connected to cTrader.'));
     }
