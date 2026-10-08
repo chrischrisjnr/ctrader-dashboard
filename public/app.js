@@ -831,7 +831,7 @@ function drawMarket() {
   } else $('#mkt-change').replaceChildren();
   $('#mkt-spread').textContent = d.bid && d.ask ? `Spread ${((d.ask - d.bid) / pip).toFixed(1)} pips` : '';
   const age = d.t ? Math.round((Date.now() - d.t) / 1000) : null;
-  $('#mkt-note').textContent = `Live bid prices from your account ${d.source || ''}${age !== null && age > 120 ? ' · market quiet or closed (last tick ' + new Date(d.t).toLocaleTimeString() + ')' : ''}${d.positions.length ? ' · dashed lines = your open trades' : ''}`;
+  $('#mkt-note').textContent = `Live bid prices from your account ${d.source || ''}${age !== null && age > 120 ? ' · market quiet or closed (last tick ' + new Date(d.t).toLocaleTimeString() + ')' : ''}${d.positions.length ? ' · dashed lines = your open trades (green = buy, red = sell)' : ''}`;
 
   // Layout and scales.
   const m = { top: 10, right: 70, bottom: 24, left: 8 };
@@ -894,8 +894,9 @@ function drawMarket() {
   for (const p of d.positions) {
     const inside = p.price >= lo && p.price <= hi;
     const y = inside ? Y(p.price) : p.price > hi ? m.top + 6 : height - m.bottom - 4;
-    if (inside) marks.append(svg('line', { x1: m.left, x2: width - m.right, y1: y, y2: y, class: 'entry-line' }));
-    const label = svg('text', { x: m.left + 4, y: y - 4, class: 'mark-label' });
+    const side = p.side === 'Buy' ? 'buy' : 'sell'; // buys green, sells red
+    if (inside) marks.append(svg('line', { x1: m.left, x2: width - m.right, y1: y, y2: y, class: `entry-line ${side}` }));
+    const label = svg('text', { x: m.left + 4, y: y - 4, class: `mark-label entry-label ${side}` });
     label.textContent = `${inside ? '' : p.price > hi ? '↑ ' : '↓ '}${p.account} · ${p.side} ${p.lots ?? ''} @ ${fmt(p.price)} · ${p.netPnl > 0 ? '+' : ''}${fmtMoney(p.netPnl, p.currency)}`;
     marks.append(label);
   }

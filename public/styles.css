@@ -369,7 +369,11 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .market-plot .price-tag.up { fill: var(--accent); }
 .market-plot .price-tag.down { fill: var(--danger); }
 .market-plot .price-tag-text { fill: var(--bg); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.market-plot .entry-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 6 4; }
+.market-plot .entry-line { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.market-plot .entry-line.buy { stroke: var(--accent); }
+.market-plot .entry-line.sell { stroke: var(--danger); }
+.market-plot .entry-label.buy { fill: var(--accent); }
+.market-plot .entry-label.sell { fill: var(--danger); }
 .market-plot .mark-label { fill: var(--text); font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
 .market-plot .crosshair { stroke: var(--muted); stroke-width: 1; }
 .market-plot .tooltip .row { justify-content: space-between; gap: 16px; }

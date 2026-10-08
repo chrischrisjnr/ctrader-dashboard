@@ -29,6 +29,7 @@ export function fakeData(now = Date.now()) {
     103: [
       { positionId: 5, tradeData: { symbolId: 2, volume: 2_000, tradeSide: 2, openTimestamp: now - 7200_000, label: 'GoldBot' }, price: 2401.2, pnl: 5310 },
       { positionId: 6, tradeData: { symbolId: 4, volume: 10_000_000, tradeSide: 2, openTimestamp: now - 3 * 3600_000, label: 'MRZ_Short' }, price: 0.9903, pnl: -1250 },
+      { positionId: 7, tradeData: { symbolId: 4, volume: 10_000_000, tradeSide: 1, openTimestamp: now - 2 * 3600_000, label: 'MRZ_Long' }, price: 0.9872, pnl: 2900 },
     ],
     102: [
       { positionId: 4, tradeData: { symbolId: 1, volume: 500_000, tradeSide: 2, openTimestamp: now - 2 * 3600_000, label: '' }, price: 1.0852, pnl: -410 },

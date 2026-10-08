@@ -101,7 +101,7 @@ a label are grouped as "No label".
 **Live AUDCAD chart:** the top of the Monitor shows a live candlestick chart of AUDCAD (change it with the
 `MARKET_SYMBOL` setting), using bid prices from one of your connected accounts, so it matches what your cBots
 see. Pick M1, M5, M15, H1, H4 or D1; the last candle updates with every tick. It shows today's change and the
-spread, and draws a dashed line at the entry price of every open trade on that symbol, labelled with the
+spread, and draws a dashed line at the entry price of every open trade on that symbol (green = buy, red = sell), labelled with the
 account, direction, size and current P&L. Rising candles are hollow green, falling candles solid red.
 
 ![Live chart](screenshot-market.png)

@@ -251,6 +251,6 @@ test('live market chart: candles from cTrader, updated by live ticks, with open 
   assert.ok(high >= Math.max(open, close) && low <= Math.min(open, close), 'valid OHLC');
   assert.equal(close, view.bid, 'last candle follows the live bid');
   assert.ok(time <= Date.now());
-  assert.deepEqual(view.positions.map((p) => [p.side, p.price, p.label]), [['Sell', 0.9903, 'MRZ_Short']]);
+  assert.deepEqual(view.positions.map((p) => [p.side, p.price, p.label]), [['Sell', 0.9903, 'MRZ_Short'], ['Buy', 0.9872, 'MRZ_Long']]);
   await assert.rejects(monitor.marketView('m7'), /Unknown timeframe/);
 });
