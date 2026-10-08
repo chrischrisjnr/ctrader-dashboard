@@ -201,3 +201,20 @@ test('figures are calculated for logins added while a calculation is running', a
   const snap = await waitFor(monitor, (s) => s.accounts.length === 3 && s.accounts.every((a) => a.performance?.trades), 15000);
   assert.ok(snap.accounts.every((a) => a.performance.trades.count >= 0));
 });
+
+test('a failing figures calculation is reported instead of "Calculating…" forever', async (t) => {
+  const { monitor, fake } = await setup(t);
+  await connect(monitor);
+  // Make cTrader refuse deal history from now on.
+  monitor.history.loading.clear();
+  const original = monitor.client.request.bind(monitor.client);
+  monitor.client.request = (type, payload) => (type === 2133 ? Promise.reject(new Error('Deal history refused')) : original(type, payload));
+  await fs.rm(path.join(path.dirname(monitor.file), 'history'), { recursive: true, force: true });
+  monitor.stats.clear();
+  monitor.refreshStats();
+  const snap = await waitFor(monitor, (s) => s.accounts.find((a) => a.id === '101')?.performance?.statsError);
+  const acc = snap.accounts.find((a) => a.id === '101');
+  assert.equal(acc.performance.statsError, 'Deal history refused');
+  assert.equal(acc.performance.growthPct, null);
+  void fake;
+});

@@ -39,21 +39,27 @@ export function accountStart(acc, now = Date.now()) {
 }
 
 /** Fetches every item in [from, to], halving windows that report hasMore. */
+const MAX_REQUESTS_PER_RANGE = 600;
+
 async function fetchRange(request, payloadType, listKey, base, from, to, out) {
+  const budget = { left: MAX_REQUESTS_PER_RANGE };
   for (let start = from; start < to; start += WINDOW_MS) {
-    await fetchWindow(request, payloadType, listKey, base, start, Math.min(start + WINDOW_MS, to), out);
+    await fetchWindow(request, payloadType, listKey, base, start, Math.min(start + WINDOW_MS, to), out, budget);
   }
 }
 
-async function fetchWindow(request, payloadType, listKey, base, from, to, out) {
+async function fetchWindow(request, payloadType, listKey, base, from, to, out, budget) {
+  if (--budget.left < 0) throw new Error(`cTrader kept reporting more history than expected (${listKey} list); stopped after ${MAX_REQUESTS_PER_RANGE} requests.`);
   const res = await request(payloadType, { ...base, fromTimestamp: from, toTimestamp: to, ...(listKey === 'deal' ? { maxRows: 10_000 } : {}) });
-  if (res.hasMore && to - from > MIN_WINDOW_MS) {
+  const items = res[listKey] || [];
+  // Only split when the window really was cut short; some servers set hasMore loosely.
+  if (res.hasMore && items.length > 0 && to - from > MIN_WINDOW_MS) {
     const mid = Math.floor((from + to) / 2);
-    await fetchWindow(request, payloadType, listKey, base, from, mid, out);
-    await fetchWindow(request, payloadType, listKey, base, mid, to, out);
+    await fetchWindow(request, payloadType, listKey, base, from, mid, out, budget);
+    await fetchWindow(request, payloadType, listKey, base, mid, to, out, budget);
     return;
   }
-  out.push(...(res[listKey] || []));
+  out.push(...items);
 }
 
 /**

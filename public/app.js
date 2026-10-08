@@ -690,13 +690,14 @@ function renderMonitor() {
           h('button', { class: 'btn small', onclick: (e) => downloadHistory(a.id, e.currentTarget) }, 'Download trade history (CSV)'))),
       chart ? chart.el : null,
       a.error ? h('p', { class: 'bot-error' }, a.error) : null,
+      perf.statsError && perf.growthPct === null ? h('p', { class: 'bot-error' }, `Couldn't calculate growth, drawdown, Sharpe and PF yet: ${perf.statsError} (retrying every 10 minutes)`) : null,
       h('div', { class: 'metrics' },
         metric('Balance', fmtMoney(a.balance, cur)),
         metric('Equity', fmtMoney(a.equity, cur)),
         metric('Floating P&L', pnl(a.floating, cur), pctSpan(perf.floatingPct)),
         metric(`Closed today (${a.closedToday.count})`, pnl(a.closedToday.pnl, cur), pctSpan(perf.closedTodayPct))),
       h('div', { class: 'metrics perf' },
-        metric('Growth (all time)', perf.growthPct === null ? h('span', { class: 'muted' }, 'Calculating…') : pctSpan(perf.growthPct),
+        metric('Growth (all time)', perf.growthPct === null ? h('span', { class: perf.statsError ? 'neg' : 'muted', title: perf.statsError || '' }, perf.statsError ? 'Not available' : 'Calculating…') : pctSpan(perf.growthPct),
           null, 'Equity now compared with the starting balance when the account opened. Deposits and withdrawals are not separated out.'),
         metric('Peak equity', perf.peakEquity === null ? h('span', { class: 'muted' }, '—') : fmtMoney(perf.peakEquity, cur),
           perf.peakAt ? new Date(perf.peakAt).toLocaleDateString() : null, 'The highest the account has ever been.'),
@@ -802,8 +803,12 @@ function renderLeaderboard(accounts) {
       return h('td', { class: `num${isBest ? ' lb-best' : ''}`, title: isBest ? 'Best in this column' : null }, c.show(v, a));
     })));
   $('#mon-lb-table').replaceChildren(h('thead', {}, header), h('tbody', {}, body));
-  const pending = accounts.filter((a) => !a.error && !a.performance?.trades).length;
-  $('#mon-lb-note').textContent = pending ? `Still calculating figures for ${pending} account${pending === 1 ? '' : 's'} (reading trade history from cTrader)…` : '';
+  const failed = accounts.filter((a) => !a.performance?.trades && a.performance?.statsError);
+  const pending = accounts.filter((a) => !a.error && !a.performance?.trades && !a.performance?.statsError).length;
+  $('#mon-lb-note').textContent = [
+    pending ? `Still calculating figures for ${pending} account${pending === 1 ? '' : 's'} (reading trade history from cTrader)…` : '',
+    failed.length ? `Couldn't calculate ${failed.length} account${failed.length === 1 ? '' : 's'}: ${failed[0].performance.statsError}` : '',
+  ].filter(Boolean).join(' ');
 }
 
 // --- Account names ----------------------------------------------------------------

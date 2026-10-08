@@ -479,13 +479,19 @@ export class Monitor extends EventEmitter {
     try {
       for (const acc of [...this.accounts.values()]) {
         if (acc.error || !this.client) continue;
+        const started = Date.now();
         try {
           const data = await this.chart(acc.id, 'all');
           if (data.stats) this.stats.set(acc.id, { ...data.stats, trades: data.trades, sharpe: data.sharpe });
-          this.emitSoon();
-        } catch {
-          // Try again on the next round.
+          else acc.statsError = 'No balance history found for this account yet.';
+          if (data.stats) acc.statsError = null;
+          console.log(`Figures for account ${acc.login}: ready in ${((Date.now() - started) / 1000).toFixed(1)}s (${data.trades?.count ?? 0} closed trades).`);
+        } catch (err) {
+          // Shown on the account card and in the server log; retried on the next round.
+          acc.statsError = err.message || String(err);
+          console.error(`Figures for account ${acc.login} failed after ${((Date.now() - started) / 1000).toFixed(1)}s: ${acc.statsError}`);
         }
+        this.emitSoon();
       }
     } finally {
       this.statsRunning = false;
@@ -508,6 +514,7 @@ export class Monitor extends EventEmitter {
       maxDrawdownPct: null,
       trades: null,
       sharpe: null,
+      statsError: acc.statsError || null,
     };
     const st = this.stats.get(acc.id);
     if (!st) return out;
