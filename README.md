@@ -115,6 +115,14 @@ shown for the selected period, the peak and the worst drawdown are marked, and *
 lines to % growth. Figures use equity where the dashboard has recorded it and balance before that;
 deposits and withdrawals are not separated out.
 
+**Sharpe, profit factor, win rate, pips:** each account card also shows
+- *Sharpe ratio*: average daily change ÷ its variability, annualised (252 trading days, 0% risk-free),
+  from end-of-day values on weekdays; needs at least 5 weekdays of history.
+- *Profit factor*: money won ÷ money lost on closed trades after costs, overall and split long / short.
+- *Win rate* and trade count (partial closes count as separate trades), and *average pips per trade*.
+
+The chart shows Sharpe and profit factor for the selected period too.
+
 ![Chart](screenshot-chart.png)
 
 **Trade history CSV** columns: account, account name, algorithm, time (UTC), deal/position/order IDs, symbol, buy/sell, open/close,

@@ -87,7 +87,7 @@ export async function accountHistory(rawRequest, acc, { now = Date.now(), onProg
   const missing = [...new Set(filled.map((d) => d.symbolId))].filter((id) => !acc.symbols.has(id));
   for (let i = 0; i < missing.length; i += 100) {
     const { symbol = [] } = await rawRequest(PT.SYMBOL_BY_ID_REQ, { ...base, symbolId: missing.slice(i, i + 100) });
-    for (const s of symbol) acc.symbols.set(s.symbolId, { lotSize: Number(s.lotSize) || 0, digits: s.digits });
+    for (const s of symbol) acc.symbols.set(s.symbolId, { lotSize: Number(s.lotSize) || 0, digits: s.digits, pipPosition: s.pipPosition });
   }
 
   const seen = new Set();

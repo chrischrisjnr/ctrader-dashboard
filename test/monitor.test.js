@@ -183,4 +183,11 @@ test('account cards carry live growth and drawdown figures', async (t) => {
   assert.ok(perf.peakEquity >= 10151.85);
   assert.ok(perf.maxDrawdownPct >= perf.currentDrawdownPct);
   assert.equal(typeof perf.growthPct, 'number');
+  // Trade quality: 40 history trades (every 4th a loser) + 1 closed today, all longs.
+  assert.equal(perf.trades.count, 41);
+  assert.equal(perf.trades.winRatePct, 75.61); // 31 of 41
+  assert.equal(typeof perf.trades.profitFactor, 'number');
+  assert.equal(perf.trades.shortPF, null);
+  assert.equal(typeof perf.trades.avgPips, 'number');
+  assert.ok('value' in perf.sharpe);
 });

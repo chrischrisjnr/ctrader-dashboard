@@ -561,6 +561,20 @@ function pctSpan(value, { signed = true, badWhenPositive = false } = {}) {
   return h('span', { class: bad ? 'neg' : good ? 'pos' : '' }, text);
 }
 
+/** Profit factor: above 1 makes money (green), below 1 loses (red). */
+function pfSpan(value) {
+  if (value === null || value === undefined) return h('span', { class: 'muted' }, '—');
+  if (value === '∞') return h('span', { class: 'pos', title: 'No losing trades yet' }, '∞');
+  return h('span', { class: value > 1 ? 'pos' : value < 1 ? 'neg' : '' }, value.toFixed(2));
+}
+
+function sharpeSpan(sharpe) {
+  if (!sharpe || sharpe.value === null || sharpe.value === undefined) {
+    return h('span', { class: 'muted', title: 'Needs at least 5 weekdays of history' }, '—');
+  }
+  return h('span', { class: sharpe.value > 0 ? 'pos' : sharpe.value < 0 ? 'neg' : '' }, sharpe.value.toFixed(2));
+}
+
 function drawdownSpan(value) {
   if (value === null || value === undefined) return h('span', { class: 'muted' }, '—');
   return h('span', { class: value > 0 ? 'neg' : '' }, value > 0 ? `−${value.toFixed(2)}%` : '0.00%');
@@ -686,6 +700,19 @@ function renderMonitor() {
           perf.peakAt ? new Date(perf.peakAt).toLocaleDateString() : null, 'The highest the account has ever been.'),
         metric('Drawdown now', drawdownSpan(perf.currentDrawdownPct), null, 'How far equity is below its highest point right now.'),
         metric('Max drawdown', drawdownSpan(perf.maxDrawdownPct), null, 'The biggest fall from a high point to a low point, ever.')),
+      h('div', { class: 'metrics perf' },
+        metric('Sharpe ratio', perf.sharpe ? sharpeSpan(perf.sharpe) : h('span', { class: 'muted' }, 'Calculating…'),
+          perf.sharpe && perf.sharpe.value === null ? `needs ${5 - perf.sharpe.days} more weekday(s)` : null,
+          'Return compared with how bumpy it was: average daily change ÷ its variability, annualised (252 trading days, 0% risk-free). Above 1 is good, above 2 is very good.'),
+        metric('Profit factor', perf.trades ? pfSpan(perf.trades.profitFactor) : h('span', { class: 'muted' }, 'Calculating…'),
+          perf.trades && perf.trades.count ? h('span', {}, 'Long ', pfSpan(perf.trades.longPF), ' · Short ', pfSpan(perf.trades.shortPF)) : null,
+          'Money won on winning trades ÷ money lost on losing trades (after costs). Above 1 = profitable.'),
+        metric('Win rate', perf.trades?.winRatePct !== null && perf.trades?.winRatePct !== undefined ? `${perf.trades.winRatePct.toFixed(1)}%` : h('span', { class: 'muted' }, '—'),
+          perf.trades ? `${perf.trades.count} trade${perf.trades.count === 1 ? '' : 's'} (${perf.trades.longCount} long · ${perf.trades.shortCount} short)` : null,
+          'Share of closed trades that made money. Partial closes count as separate trades.'),
+        metric('Avg pips / trade', perf.trades?.avgPips !== null && perf.trades?.avgPips !== undefined
+          ? h('span', { class: perf.trades.avgPips > 0 ? 'pos' : perf.trades.avgPips < 0 ? 'neg' : '' }, `${perf.trades.avgPips > 0 ? '+' : ''}${perf.trades.avgPips.toFixed(1)}`)
+          : h('span', { class: 'muted' }, '—'), null, 'Average pips gained per closed trade, from entry and exit prices.')),
       bots,
       positions);
   }));
@@ -844,6 +871,9 @@ function drawChart(c) {
       h('strong', {}, fmtMoney(st.peak.v, cur)), h('span', { class: 'muted' }, new Date(st.peak.t).toLocaleDateString())),
     h('div', { class: 'chip', title: 'Biggest fall from a high to a low in this period.' }, h('span', {}, 'Max drawdown'), drawdownSpan(st.maxDrawdownPct)),
     h('div', { class: 'chip', title: 'How far below the period\'s high it is now.' }, h('span', {}, 'From peak now'), drawdownSpan(st.currentDrawdownPct)),
+    h('div', { class: 'chip', title: 'Sharpe ratio for this period (daily, annualised).' }, h('span', {}, 'Sharpe'), sharpeSpan(d.sharpe)),
+    h('div', { class: 'chip', title: 'Profit factor of trades closed in this period.' }, h('span', {}, 'PF'), pfSpan(d.trades?.profitFactor),
+      h('span', { class: 'muted' }, d.trades?.count ? `${d.trades.count} trades` : 'no trades')),
   ] : []));
 
   // In % mode every value is shown as growth from the start of the period.

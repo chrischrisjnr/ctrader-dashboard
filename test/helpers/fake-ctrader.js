@@ -7,9 +7,9 @@ const DAY = 24 * 3600_000;
 
 export function fakeData(now = Date.now()) {
   const symbols = [
-    { symbolId: 1, symbolName: 'EURUSD', lotSize: 10_000_000 },
-    { symbolId: 2, symbolName: 'XAUUSD', lotSize: 10_000 },
-    { symbolId: 3, symbolName: 'GBPUSD', lotSize: 10_000_000 },
+    { symbolId: 1, symbolName: 'EURUSD', lotSize: 10_000_000, pipPosition: 4 },
+    { symbolId: 2, symbolName: 'XAUUSD', lotSize: 10_000, pipPosition: 2 },
+    { symbolId: 3, symbolName: 'GBPUSD', lotSize: 10_000_000, pipPosition: 4 },
   ];
   const accounts = [
     { ctidTraderAccountId: 101, traderLogin: 5123456, brokerTitleShort: 'IC Markets', isLive: false, balance: 1_012_345, deposit: 'USD' },
@@ -44,8 +44,9 @@ export function fakeData(now = Date.now()) {
       orders[acc].push({ orderId: pos * 10, positionId: pos, closingOrder: false, tradeData: { label, comment: '' } });
       orders[acc].push({ orderId: pos * 10 + 1, positionId: pos, closingOrder: true, tradeData: { label: '' } });
       deals[acc].push({ dealId: pos * 10, orderId: pos * 10, positionId: pos, symbolId: 1, filledVolume: 1_000_000, volume: 1_000_000, tradeSide: 1, executionTimestamp: opened, executionPrice: 1.08, dealStatus: 2, commission: -35, moneyDigits: 2 });
-      deals[acc].push({ dealId: pos * 10 + 1, orderId: pos * 10 + 1, positionId: pos, symbolId: 1, filledVolume: 1_000_000, volume: 1_000_000, tradeSide: 2, executionTimestamp: opened + 3600_000, executionPrice: 1.081, dealStatus: 2, commission: -35, moneyDigits: 2,
-        closePositionDetail: { entryPrice: 1.08, grossProfit: 1000 + i, swap: -10, commission: -70, balance: 1_000_000 + i * 100, moneyDigits: 2 } });
+      const loser = i % 4 === 3;
+      deals[acc].push({ dealId: pos * 10 + 1, orderId: pos * 10 + 1, positionId: pos, symbolId: 1, filledVolume: 1_000_000, volume: 1_000_000, tradeSide: 2, executionTimestamp: opened + 3600_000, executionPrice: loser ? 1.0785 : 1.081, dealStatus: 2, commission: -35, moneyDigits: 2,
+        closePositionDetail: { entryPrice: 1.08, grossProfit: loser ? -1500 : 1000 + i, swap: -10, commission: -70, balance: 1_000_000 + i * 100, moneyDigits: 2 } });
     }
     deals[acc].push({ dealId: 1, orderId: 1, positionId: 1, symbolId: 1, volume: 1, tradeSide: 1, executionTimestamp: now - DAY, dealStatus: 4 }); // rejected: must be skipped
   }
@@ -103,7 +104,7 @@ export async function startFakeCtrader({ data = fakeData(), maxPerPage = 15 } = 
         case PT.SYMBOLS_LIST_REQ:
           return reply(PT.SYMBOLS_LIST_RES, { symbol: data.symbols.map(({ symbolId, symbolName }) => ({ symbolId, symbolName })) });
         case PT.SYMBOL_BY_ID_REQ:
-          return reply(PT.SYMBOL_BY_ID_RES, { symbol: data.symbols.filter((s) => p.symbolId.includes(s.symbolId)).map((s) => ({ symbolId: s.symbolId, lotSize: s.lotSize, digits: 5 })) });
+          return reply(PT.SYMBOL_BY_ID_RES, { symbol: data.symbols.filter((s) => p.symbolId.includes(s.symbolId)).map((s) => ({ symbolId: s.symbolId, lotSize: s.lotSize, digits: 5, pipPosition: s.pipPosition })) });
         case PT.TRADER_REQ:
           return reply(PT.TRADER_RES, { trader: { ctidTraderAccountId: acc.ctidTraderAccountId, balance: acc.balance, moneyDigits: 2, depositAssetId: acc.deposit === 'USD' ? 1 : 2, registrationTimestamp: data.registeredAt } });
         case PT.RECONCILE_REQ:

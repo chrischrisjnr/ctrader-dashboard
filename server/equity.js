@@ -1,9 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { PT } from './ctrader/client.js';
 import { accountStart, fetchDeals, throttled } from './history.js';
 
 const MAX_POINTS = 600;
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
+const TRADING_DAYS_PER_YEAR = 252;
 export const RANGES = { '1d': 86_400_000, '1w': 7 * 86_400_000, '1m': 30 * 86_400_000, '3m': 91 * 86_400_000, all: Infinity };
 
 const money = (value, digits) => (Number(value) || 0) / 10 ** digits;
@@ -52,10 +54,10 @@ export class EquityHistory {
     if (running) return running;
     const task = (async () => {
       const file = this.file(acc.id, 'balance.json');
-      let cache = { version: CACHE_VERSION, through: 0, start: null, points: [] };
+      let cache = { version: CACHE_VERSION, through: 0, start: null, points: [], closes: [] };
       try {
         const saved = JSON.parse(await fs.readFile(file, 'utf8'));
-        if (saved.version === CACHE_VERSION) cache = saved; // older caches lack the starting balance: rebuild
+        if (saved.version === CACHE_VERSION) cache = saved; // older caches lack newer fields: rebuild
       } catch (err) {
         if (err.code !== 'ENOENT') throw err;
       }
@@ -75,6 +77,10 @@ export class EquityHistory {
           cache.start = Math.round((after - net) * 100) / 100;
         }
         cache.points.push([d.executionTimestamp, after]);
+        // One closed trade: [time, net result, 1 if it closed a long, symbol, entry price, exit price]
+        const net = money((Number(cpd.grossProfit) || 0) + (Number(cpd.swap) || 0) + (Number(cpd.commission) || 0) + (Number(cpd.pnlConversionFee) || 0), digits);
+        const closedLong = d.tradeSide === 2 || d.tradeSide === 'SELL' ? 1 : 0; // a sell closes a long
+        cache.closes.push([d.executionTimestamp, Math.round(net * 100) / 100, closedLong, d.symbolId, Number(cpd.entryPrice), Number(d.executionPrice)]);
       }
       cache.points.sort((a, b) => a[0] - b[0]);
       cache.through = now;
@@ -90,6 +96,7 @@ export class EquityHistory {
   async chart(acc, rawRequest, range = 'all', now = Date.now()) {
     const span = RANGES[range] ?? Infinity;
     const [cache, samples] = await Promise.all([this.balancePoints(acc, rawRequest, now), this.samples(acc.id)]);
+    await this.loadPipSizes(acc, cache.closes, rawRequest);
     const dealPoints = cache.points;
     // The account starts at its first deposit, just before the first closed trade.
     const opening = cache.start !== null && dealPoints.length
@@ -110,7 +117,25 @@ export class EquityHistory {
       balance: downsample(clip(balance, start, true), MAX_POINTS, 'last'),
       equity: downsample(clip(equity, start, false), MAX_POINTS, 'minmax'),
       stats: performanceStats(clip(performance, start, true)),
+      trades: tradeStats(cache.closes.filter((c) => c[0] >= start), acc.symbols),
+      sharpe: dailySharpe(clip(performance, start, true)),
     };
+  }
+
+  /** Pip size per traded symbol (needed for pips per trade). */
+  async loadPipSizes(acc, closes, rawRequest) {
+    if (!acc.symbols) return;
+    const missing = [...new Set(closes.map((c) => c[3]))].filter((id) => id !== undefined && acc.symbols.get(id)?.pipPosition === undefined);
+    for (let i = 0; i < missing.length; i += 100) {
+      try {
+        const { symbol = [] } = await rawRequest(PT.SYMBOL_BY_ID_REQ, { ctidTraderAccountId: acc.numericId, symbolId: missing.slice(i, i + 100) });
+        for (const s of symbol) {
+          acc.symbols.set(s.symbolId, { ...acc.symbols.get(s.symbolId), lotSize: Number(s.lotSize) || 0, digits: s.digits, pipPosition: s.pipPosition });
+        }
+      } catch {
+        return; // pips are optional; everything else still works
+      }
+    }
   }
 }
 
@@ -188,4 +213,64 @@ export function performanceStats(points) {
     maxDrawdownPct: pct(maxDd.pct),
     maxDrawdown: maxDd.peak ? { peak: maxDd.peak, trough: maxDd.trough } : null,
   };
+}
+
+const round2 = (n) => Math.round(n * 100) / 100;
+
+function profitFactor(trades) {
+  let won = 0;
+  let lost = 0;
+  for (const t of trades) {
+    if (t[1] > 0) won += t[1];
+    else lost -= t[1];
+  }
+  if (!trades.length) return null;
+  return lost === 0 ? (won > 0 ? '∞' : null) : round2(won / lost); // '∞' = no losing trades yet
+}
+
+/** Profit factor, win rate and pips from closed trades (each partial close counts as a trade). */
+export function tradeStats(closes, symbols = new Map()) {
+  if (!closes.length) return { count: 0, winRatePct: null, profitFactor: null, longPF: null, shortPF: null, longCount: 0, shortCount: 0, avgPips: null };
+  const longs = closes.filter((c) => c[2] === 1);
+  const shorts = closes.filter((c) => c[2] !== 1);
+  let pipsTotal = 0;
+  let pipsCount = 0;
+  for (const [, , isLong, symbolId, entry, exit] of closes) {
+    const pipPosition = symbols.get?.(symbolId)?.pipPosition;
+    if (pipPosition === undefined || !Number.isFinite(entry) || !Number.isFinite(exit)) continue;
+    pipsTotal += ((isLong ? exit - entry : entry - exit) * 10 ** pipPosition);
+    pipsCount += 1;
+  }
+  return {
+    count: closes.length,
+    winRatePct: round2((closes.filter((c) => c[1] > 0).length / closes.length) * 100),
+    profitFactor: profitFactor(closes),
+    longPF: profitFactor(longs),
+    shortPF: profitFactor(shorts),
+    longCount: longs.length,
+    shortCount: shorts.length,
+    avgPips: pipsCount ? Math.round((pipsTotal / pipsCount) * 10) / 10 : null,
+  };
+}
+
+/**
+ * Sharpe ratio from daily changes of the value series (end-of-day values, UTC, weekdays only),
+ * annualised with 252 trading days and a 0% risk-free rate. Needs at least 5 daily changes.
+ */
+export function dailySharpe(points) {
+  const endOfDay = new Map();
+  for (const [t, v] of points) {
+    const day = new Date(t);
+    const dow = day.getUTCDay();
+    if (dow === 0 || dow === 6) continue;
+    endOfDay.set(day.toISOString().slice(0, 10), v);
+  }
+  const values = [...endOfDay.values()];
+  const returns = [];
+  for (let i = 1; i < values.length; i++) if (values[i - 1] > 0) returns.push(values[i] / values[i - 1] - 1);
+  if (returns.length < 5) return { value: null, days: returns.length };
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (returns.length - 1);
+  const sd = Math.sqrt(variance);
+  return { value: sd > 0 ? round2((mean / sd) * Math.sqrt(TRADING_DAYS_PER_YEAR)) : null, days: returns.length };
 }

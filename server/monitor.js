@@ -347,7 +347,7 @@ export class Monitor extends EventEmitter {
     const missing = [...new Set(raw.map((p) => p.tradeData.symbolId))].filter((id) => !acc.symbols.has(id));
     if (missing.length) {
       const { symbol = [] } = await client.request(PT.SYMBOL_BY_ID_REQ, { ctidTraderAccountId, symbolId: missing });
-      for (const s of symbol) acc.symbols.set(s.symbolId, { lotSize: Number(s.lotSize) || 0, digits: s.digits });
+      for (const s of symbol) acc.symbols.set(s.symbolId, { lotSize: Number(s.lotSize) || 0, digits: s.digits, pipPosition: s.pipPosition });
     }
     const previous = new Map(acc.positions.map((p) => [p.id, p]));
     acc.positions = raw.map((p) => {
@@ -476,7 +476,7 @@ export class Monitor extends EventEmitter {
         if (acc.error || !this.client) continue;
         try {
           const data = await this.chart(acc.id, 'all');
-          if (data.stats) this.stats.set(acc.id, data.stats);
+          if (data.stats) this.stats.set(acc.id, { ...data.stats, trades: data.trades, sharpe: data.sharpe });
           this.emitSoon();
         } catch {
           // Try again on the next round.
@@ -500,6 +500,8 @@ export class Monitor extends EventEmitter {
       peakAt: null,
       currentDrawdownPct: null,
       maxDrawdownPct: null,
+      trades: null,
+      sharpe: null,
     };
     const st = this.stats.get(acc.id);
     if (!st) return out;
@@ -512,6 +514,8 @@ export class Monitor extends EventEmitter {
       peakAt: peak.t,
       currentDrawdownPct: pct(currentDd),
       maxDrawdownPct: Math.max(st.maxDrawdownPct, pct(currentDd)),
+      trades: st.trades ?? null,
+      sharpe: st.sharpe ?? null,
     };
   }
 

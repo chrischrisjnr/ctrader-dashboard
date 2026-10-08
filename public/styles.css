@@ -328,3 +328,4 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .backup-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px; }
 .backup-row p { margin: 2px 0 0; }
 .restore-line { margin: -4px 0 14px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.metric small .pos, .metric small .neg { font-weight: 700; }

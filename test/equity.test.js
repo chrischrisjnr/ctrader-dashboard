@@ -72,3 +72,38 @@ test('performance stats: growth, peak and drawdowns', () => {
   assert.equal(flat.maxDrawdownPct, 0);
   assert.equal(flat.maxDrawdown, null);
 });
+
+test('trade stats: profit factor (overall, long, short), win rate and pips', async () => {
+  const { tradeStats, dailySharpe } = await import('../server/equity.js');
+  const symbols = new Map([[1, { pipPosition: 4 }]]);
+  // [time, net, closedLong, symbol, entry, exit]
+  const closes = [
+    [1, 100, 1, 1, 1.0800, 1.0810], // long +10 pips
+    [2, -50, 1, 1, 1.0800, 1.0795], // long -5 pips
+    [3, 200, 0, 1, 1.0900, 1.0880], // short +20 pips
+    [4, -25, 0, 1, 1.0900, 1.0905], // short -5 pips
+  ];
+  const st = tradeStats(closes, symbols);
+  assert.equal(st.count, 4);
+  assert.equal(st.winRatePct, 50);
+  assert.equal(st.profitFactor, 4); // 300 / 75
+  assert.equal(st.longPF, 2); // 100 / 50
+  assert.equal(st.shortPF, 8); // 200 / 25
+  assert.equal(st.avgPips, 5); // (10 - 5 + 20 - 5) / 4
+  assert.equal(tradeStats([[1, 10, 1, 1, 1, 1]]).profitFactor, '∞');
+  assert.equal(tradeStats([]).profitFactor, null);
+
+  // Sharpe from weekday closes: a steady rise with small wobbles gives a high positive Sharpe.
+  const day = 86_400_000;
+  const monday = Date.UTC(2026, 8, 7);
+  const pts = [];
+  let v = 100;
+  for (let i = 0; i < 21; i++) {
+    v *= 1 + 0.002 + (i % 2 ? 0.001 : -0.001);
+    pts.push([monday + i * day + 20 * 3600_000, v]);
+  }
+  const sharpe = dailySharpe(pts);
+  assert.equal(sharpe.days, 14); // 15 weekdays -> 14 daily changes; weekends ignored
+  assert.ok(sharpe.value > 10);
+  assert.equal(dailySharpe(pts.slice(0, 4)).value, null, 'too few days');
+});
