@@ -634,6 +634,8 @@ function renderMonitor() {
     h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, 'Floating P&L'), h('span', { class: 'stat-value small' }, lines('floating', true))),
     h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, 'Closed today'), h('span', { class: 'stat-value small' }, lines('closed', true))));
 
+  renderLeaderboard(m.accounts);
+
   if (!m.accounts.length) {
     $('#mon-accounts').replaceChildren(h('div', { class: 'empty' }, h('p', {}, m.state === 'connected'
       ? 'No demo accounts found on this cTrader ID.' + (m.hiddenLiveAccounts ? ` (${m.hiddenLiveAccounts} live account(s) are hidden on purpose.)` : '')
@@ -716,6 +718,92 @@ function renderMonitor() {
       bots,
       positions);
   }));
+}
+
+// --- Leaderboard ------------------------------------------------------------------
+
+// Each column: how to read the value, whether higher is better, and how to show it.
+const LB_COLUMNS = [
+  { key: 'growth', label: 'Growth', title: 'All-time growth %', get: (a) => a.performance?.growthPct, better: 'high', show: (v) => pctSpan(v) },
+  // No "best" for equity: accounts can be in different currencies and sizes.
+  { key: 'equity', label: 'Equity', get: (a) => a.equity, better: null, show: (v, a) => fmtMoney(v, a.currency) },
+  { key: 'floating', label: 'Open P&L', title: 'Floating P&L as % of balance', get: (a) => a.performance?.floatingPct, better: 'high', show: (v) => pctSpan(v) },
+  { key: 'ddNow', label: 'DD now', title: 'Drawdown from peak right now', get: (a) => a.performance?.currentDrawdownPct, better: 'low', show: (v) => drawdownSpan(v) },
+  { key: 'maxDd', label: 'Max DD', title: 'Maximum drawdown, all time', get: (a) => a.performance?.maxDrawdownPct, better: 'low', show: (v) => drawdownSpan(v) },
+  { key: 'sharpe', label: 'Sharpe', get: (a) => a.performance?.sharpe?.value, better: 'high', show: (v, a) => sharpeSpan(a.performance?.sharpe) },
+  { key: 'pf', label: 'PF', title: 'Profit factor', get: (a) => a.performance?.trades?.profitFactor, better: 'high', show: (v) => pfSpan(v) },
+  { key: 'longPf', label: 'Long PF', get: (a) => a.performance?.trades?.longPF, better: 'high', show: (v) => pfSpan(v) },
+  { key: 'shortPf', label: 'Short PF', get: (a) => a.performance?.trades?.shortPF, better: 'high', show: (v) => pfSpan(v) },
+  { key: 'win', label: 'Win %', get: (a) => a.performance?.trades?.winRatePct, better: 'high', show: (v) => (v === null || v === undefined ? h('span', { class: 'muted' }, '—') : `${v.toFixed(1)}%`) },
+  { key: 'trades', label: 'Trades', get: (a) => a.performance?.trades?.count, better: null, show: (v) => (v === null || v === undefined ? h('span', { class: 'muted' }, '—') : String(v)) },
+  { key: 'pips', label: 'Pips/trade', title: 'Average pips per closed trade', get: (a) => a.performance?.trades?.avgPips, better: 'high',
+    show: (v) => (v === null || v === undefined ? h('span', { class: 'muted' }, '—') : h('span', { class: v > 0 ? 'pos' : v < 0 ? 'neg' : '' }, `${v > 0 ? '+' : ''}${v.toFixed(1)}`)) },
+];
+
+const lbSort = (() => {
+  try {
+    return JSON.parse(localStorage.getItem('ctdash.lbSort')) || { key: 'growth', dir: 'desc' };
+  } catch {
+    return { key: 'growth', dir: 'desc' };
+  }
+})();
+
+const lbNumber = (v) => (v === '∞' ? Infinity : typeof v === 'number' && Number.isFinite(v) ? v : v === Infinity ? Infinity : null);
+
+function renderLeaderboard(accounts) {
+  const box = $('#mon-leaderboard');
+  box.hidden = accounts.length < 2;
+  if (box.hidden) return;
+  const col = LB_COLUMNS.find((c) => c.key === lbSort.key) || LB_COLUMNS[0];
+  const rows = [...accounts].sort((a, b) => {
+    const va = lbNumber(col.get(a));
+    const vb = lbNumber(col.get(b));
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1; // unknown values always go last
+    if (vb === null) return -1;
+    return lbSort.dir === 'asc' ? va - vb : vb - va;
+  });
+  // Best value per column (only when at least two accounts have one).
+  const best = new Map();
+  for (const c of LB_COLUMNS) {
+    if (!c.better) continue;
+    const vals = accounts.map((a) => lbNumber(c.get(a))).filter((v) => v !== null);
+    if (vals.length < 2) continue;
+    const top = c.better === 'high' ? Math.max(...vals) : Math.min(...vals);
+    if (vals.filter((v) => v === top).length < vals.length) best.set(c.key, top);
+  }
+  const header = h('tr', {},
+    h('th', {}, '#'),
+    h('th', {}, 'Account'),
+    LB_COLUMNS.map((c) => {
+      const active = c.key === lbSort.key;
+      return h('th', { class: 'num', 'aria-sort': active ? (lbSort.dir === 'asc' ? 'ascending' : 'descending') : 'none' },
+        h('button', {
+          type: 'button',
+          class: `lb-sort${active ? ' active' : ''}`,
+          title: c.title ? `${c.title}. Click to rank by this.` : 'Click to rank by this.',
+          onclick: () => {
+            if (lbSort.key === c.key) lbSort.dir = lbSort.dir === 'asc' ? 'desc' : 'asc';
+            else Object.assign(lbSort, { key: c.key, dir: c.better === 'low' ? 'asc' : 'desc' });
+            try { localStorage.setItem('ctdash.lbSort', JSON.stringify(lbSort)); } catch { /* storage unavailable */ }
+            renderLeaderboard(state.monitor.accounts);
+          },
+        }, c.label, active ? (lbSort.dir === 'asc' ? ' ▲' : ' ▼') : ''));
+    }));
+  const body = rows.map((a, i) => h('tr', {},
+    h('td', { class: 'lb-rank' }, String(i + 1)),
+    h('td', { class: 'lb-account' },
+      h('a', { href: `#account-${a.id}`, onclick: (e) => { e.preventDefault(); document.querySelector(`.mon-account[data-id="${CSS.escape(a.id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } },
+        a.name || `#${a.login}`),
+      h('div', { class: 'muted' }, [a.name ? `#${a.login}` : a.broker, a.algorithm].filter(Boolean).join(' · '))),
+    LB_COLUMNS.map((c) => {
+      const v = c.get(a);
+      const isBest = best.has(c.key) && lbNumber(v) === best.get(c.key);
+      return h('td', { class: `num${isBest ? ' lb-best' : ''}`, title: isBest ? 'Best in this column' : null }, c.show(v, a));
+    })));
+  $('#mon-lb-table').replaceChildren(h('thead', {}, header), h('tbody', {}, body));
+  const pending = accounts.filter((a) => !a.error && !a.performance?.trades).length;
+  $('#mon-lb-note').textContent = pending ? `Still calculating figures for ${pending} account${pending === 1 ? '' : 's'} (reading trade history from cTrader)…` : '';
 }
 
 // --- Account names ----------------------------------------------------------------

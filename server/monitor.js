@@ -469,8 +469,13 @@ export class Monitor extends EventEmitter {
 
   /** All-time growth, peak and drawdown per account, refreshed in the background. */
   async refreshStats() {
-    if (this.statsRunning) return;
+    if (this.statsRunning) {
+      // A run is in progress (e.g. from before a reconnect); do another full pass right after it.
+      this.statsAgain = true;
+      return;
+    }
     this.statsRunning = true;
+    this.statsAgain = false;
     try {
       for (const acc of [...this.accounts.values()]) {
         if (acc.error || !this.client) continue;
@@ -485,6 +490,7 @@ export class Monitor extends EventEmitter {
     } finally {
       this.statsRunning = false;
     }
+    if (this.statsAgain) await this.refreshStats();
   }
 
   /** Combines stored all-time stats with the live equity so the numbers move in real time. */

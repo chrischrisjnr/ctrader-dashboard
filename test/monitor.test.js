@@ -191,3 +191,13 @@ test('account cards carry live growth and drawdown figures', async (t) => {
   assert.equal(typeof perf.trades.avgPips, 'number');
   assert.ok('value' in perf.sharpe);
 });
+
+test('figures are calculated for logins added while a calculation is running', async (t) => {
+  const { monitor } = await setup(t);
+  await connect(monitor);
+  // Add the second login immediately, while the first round of figures is still being worked out.
+  monitor.beginLogin('x');
+  await monitor.finishLogin({ code: 'code-2', redirectUri: 'x' });
+  const snap = await waitFor(monitor, (s) => s.accounts.length === 3 && s.accounts.every((a) => a.performance?.trades), 15000);
+  assert.ok(snap.accounts.every((a) => a.performance.trades.count >= 0));
+});

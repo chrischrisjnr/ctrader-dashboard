@@ -123,6 +123,11 @@ deposits and withdrawals are not separated out.
 
 The chart shows Sharpe and profit factor for the selected period too.
 
+**Leaderboard:** with two or more accounts, a table at the top of the Monitor ranks them side by side:
+growth, equity, open P&L, drawdown now, max drawdown, Sharpe, profit factor (overall, long, short),
+win rate, trades and pips per trade. Click a column heading to rank by it (click again to flip);
+the best value in each column gets a ★. Click an account name to jump to its card.
+
 ![Chart](screenshot-chart.png)
 
 **Trade history CSV** columns: account, account name, algorithm, time (UTC), deal/position/order IDs, symbol, buy/sell, open/close,

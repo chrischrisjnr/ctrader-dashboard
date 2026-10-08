@@ -329,3 +329,19 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .backup-row p { margin: 2px 0 0; }
 .restore-line { margin: -4px 0 14px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .metric small .pos, .metric small .neg { font-weight: 700; }
+
+/* Leaderboard */
+.leaderboard { margin-bottom: 20px; display: flex; flex-direction: column; gap: 12px; }
+.leaderboard h3 { margin: 0; font-size: 1.05rem; }
+.leaderboard .section-head { margin-bottom: 0; }
+.lb-table th, .lb-table td { padding: 8px 10px; white-space: nowrap; }
+.lb-table td.lb-account { white-space: normal; min-width: 160px; }
+.lb-table td.lb-account a { color: var(--text); font-weight: 700; text-decoration: none; }
+.lb-table td.lb-account a:hover { text-decoration: underline; }
+.lb-table td.lb-account .muted { font-size: 0.8rem; }
+.lb-rank { font-weight: 700; color: var(--muted); width: 1%; }
+.lb-sort { background: none; border: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; padding: 0; }
+.lb-sort.active { color: var(--text); }
+.lb-best { background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 700; }
+.lb-best::after { content: " ★"; color: var(--accent); font-size: 0.75rem; }
+#mon-lb-note:empty { display: none; }
