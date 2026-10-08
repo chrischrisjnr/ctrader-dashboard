@@ -33,6 +33,8 @@ export const config = Object.freeze({
   openApiUrl: env.OPENAPI_URL || 'wss://demo.ctraderapi.com:5036',
   openApiAuthBase: env.OPENAPI_AUTH_BASE || 'https://id.ctrader.com',
   openApiTokenUrl: env.OPENAPI_TOKEN_URL || 'https://openapi.ctrader.com/apps/token',
+  // Symbol for the live candlestick chart at the top of the Monitor.
+  marketSymbol: (env.MARKET_SYMBOL || 'AUDCAD').toUpperCase(),
   maxLogLines: 1000,
   maxBotUploadBytes: 50 * 1024 * 1024,
 });

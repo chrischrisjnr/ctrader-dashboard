@@ -5,6 +5,7 @@ import { OpenApiClient, OpenApiError, PT } from './ctrader/client.js';
 import { authorizeUrl, exchangeCode, refreshTokens } from './ctrader/oauth.js';
 import { EquityHistory } from './equity.js';
 import { accountHistory, toCsv } from './history.js';
+import { MarketFeed } from './market.js';
 import { newId } from './store.js';
 
 const PNL_POLL_MS = 5_000;
@@ -41,6 +42,8 @@ export class Monitor extends EventEmitter {
     this.meta = {}; // account id -> { name, algorithm }
     this.history = new EquityHistory(path.join(path.dirname(file), 'history'));
     this.stats = new Map(); // account id -> all-time performance (start, peak, max drawdown)
+    this.market = new MarketFeed({ symbol: config.marketSymbol || 'AUDCAD' });
+    this.market.on('price', (quote) => this.emit('price', quote));
     this.settings = {};
     this.state = 'not_configured';
     this.error = null;
@@ -216,6 +219,7 @@ export class Monitor extends EventEmitter {
 
   stop() {
     this.stopped = true;
+    this.market.reset();
     clearTimeout(this.statsRetryTimer);
     this.statsRetryTimer = null;
     for (const t of this.timers) clearInterval(t);
@@ -284,6 +288,7 @@ export class Monitor extends EventEmitter {
       this.timers.push(setInterval(() => this.refreshStats(), STATS_REFRESH_MS));
       this.recordEquity();
       this.refreshStats();
+      this.market.attach(client, [...this.accounts.values()].filter((a) => !a.error)).catch(() => {});
     } catch (err) {
       client?.close();
       await this.handleFailure(err);
@@ -436,6 +441,9 @@ export class Monitor extends EventEmitter {
           acc.refreshTimer = setTimeout(() => this.refreshAccount(acc).catch(() => {}), 500);
         }
         break;
+      case PT.SPOT_EVENT:
+        this.market.onSpot(p);
+        break;
       case PT.TRADER_UPDATE_EVENT:
         if (acc) this.applyTrader(acc, p.trader);
         break;
@@ -467,6 +475,28 @@ export class Monitor extends EventEmitter {
       if (acc.error || !acc.updatedAt || now - acc.updatedAt > 2 * 60_000) continue;
       this.history.record(acc.id, now, round2(acc.balance), round2(this.equityOf(acc))).catch(() => {});
     }
+  }
+
+  /** Candles + live quote for the market chart, with every open trade on that symbol. */
+  async marketView(period) {
+    const candles = await this.market.getCandles(period);
+    const symbol = this.market.symbol;
+    const positions = [];
+    for (const acc of this.accounts.values()) {
+      for (const p of acc.positions) {
+        if (String(p.symbol).toUpperCase() !== symbol) continue;
+        positions.push({
+          account: this.meta[acc.id]?.name || `#${acc.login}`,
+          side: p.side,
+          price: p.openPrice,
+          lots: p.lots,
+          netPnl: p.netPnl,
+          currency: acc.currency || '',
+          label: p.label || p.comment || '',
+        });
+      }
+    }
+    return { ...this.market.quote(), period, candles, positions, source: this.market.account ? `#${this.market.account.login}` : null };
   }
 
   /** All-time growth, peak and drawdown per account, refreshed in the background. */

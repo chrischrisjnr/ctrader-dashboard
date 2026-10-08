@@ -10,6 +10,7 @@ export function fakeData(now = Date.now()) {
     { symbolId: 1, symbolName: 'EURUSD', lotSize: 10_000_000, pipPosition: 4 },
     { symbolId: 2, symbolName: 'XAUUSD', lotSize: 10_000, pipPosition: 2 },
     { symbolId: 3, symbolName: 'GBPUSD', lotSize: 10_000_000, pipPosition: 4 },
+    { symbolId: 4, symbolName: 'AUDCAD', lotSize: 10_000_000, pipPosition: 4 },
   ];
   const accounts = [
     { ctidTraderAccountId: 101, traderLogin: 5123456, brokerTitleShort: 'IC Markets', isLive: false, balance: 1_012_345, deposit: 'USD' },
@@ -27,6 +28,7 @@ export function fakeData(now = Date.now()) {
     ],
     103: [
       { positionId: 5, tradeData: { symbolId: 2, volume: 2_000, tradeSide: 2, openTimestamp: now - 7200_000, label: 'GoldBot' }, price: 2401.2, pnl: 5310 },
+      { positionId: 6, tradeData: { symbolId: 4, volume: 10_000_000, tradeSide: 2, openTimestamp: now - 3 * 3600_000, label: 'MRZ_Short' }, price: 0.9903, pnl: -1250 },
     ],
     102: [
       { positionId: 4, tradeData: { symbolId: 1, volume: 500_000, tradeSide: 2, openTimestamp: now - 2 * 3600_000, label: '' }, price: 1.0852, pnl: -410 },
@@ -79,7 +81,10 @@ export async function startFakeCtrader({ data = fakeData(), maxPerPage = 15, rat
     res.writeHead(404).end();
   });
   const wss = new WebSocketServer({ server });
+  const PERIOD_MS = { 1: 60_000, 5: 300_000, 7: 900_000, 9: 3_600_000, 10: 14_400_000, 12: 86_400_000 };
   wss.on('connection', (ws) => {
+    let spotTimer = null;
+    ws.on('close', () => clearInterval(spotTimer));
     const historyTimes = []; // like cTrader: at most 5 history requests per second per connection
     ws.on('message', (raw) => {
       const msg = JSON.parse(raw);
@@ -131,6 +136,34 @@ export async function startFakeCtrader({ data = fakeData(), maxPerPage = 15, rat
             return deal && inRange(deal.executionTimestamp);
           });
           return reply(PT.ORDER_LIST_RES, { order: items.slice(0, maxPerPage), hasMore: items.length > maxPerPage });
+        }
+        case PT.SUBSCRIBE_SPOTS_REQ: {
+          reply(PT.SUBSCRIBE_SPOTS_RES, { ctidTraderAccountId: p.ctidTraderAccountId });
+          let price = 99_000;
+          clearInterval(spotTimer);
+          spotTimer = setInterval(() => {
+            price += Math.round((Math.random() - 0.5) * 6);
+            ws.send(JSON.stringify({ payloadType: PT.SPOT_EVENT, payload: { ctidTraderAccountId: p.ctidTraderAccountId, symbolId: p.symbolId[0], bid: price, ask: price + 2, timestamp: Date.now() } }));
+          }, 200);
+          return undefined;
+        }
+        case PT.GET_TRENDBARS_REQ: {
+          const ms = PERIOD_MS[p.period];
+          if (!ms) return reply(PT.ERROR_RES, { errorCode: 'INVALID_REQUEST', description: 'Bad period' });
+          const count = p.count || 100;
+          const last = Math.floor(p.toTimestamp / ms) * ms;
+          let level = 98_500;
+          const trendbar = [];
+          for (let i = count - 1; i >= 0; i--) {
+            const t = last - i * ms;
+            const open = level;
+            const close = open + Math.round(Math.sin(i / 7) * 25 + (Math.random() - 0.5) * 30);
+            const low = Math.min(open, close) - Math.round(Math.random() * 15);
+            const high = Math.max(open, close) + Math.round(Math.random() * 15);
+            trendbar.push({ low, deltaOpen: open - low, deltaClose: close - low, deltaHigh: high - low, utcTimestampInMinutes: t / 60_000, volume: 100 });
+            level = close;
+          }
+          return reply(PT.GET_TRENDBARS_RES, { ctidTraderAccountId: p.ctidTraderAccountId, period: p.period, trendbar });
         }
         default:
           return reply(PT.ERROR_RES, { errorCode: 'UNSUPPORTED', description: `Fake server does not support ${msg.payloadType}` });

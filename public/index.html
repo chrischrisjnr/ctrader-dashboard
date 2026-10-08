@@ -54,6 +54,20 @@
 
     <main class="content">
       <section data-panel="monitor">
+        <section class="card market" id="mon-market" hidden aria-label="Live price chart">
+          <div class="market-head">
+            <div class="market-title">
+              <h3 id="mkt-symbol">AUDCAD</h3>
+              <span class="mkt-price" id="mkt-bid">—</span>
+              <span class="mkt-change" id="mkt-change"></span>
+              <span class="muted mkt-spread" id="mkt-spread"></span>
+            </div>
+            <div class="segmented" id="mkt-periods" role="group" aria-label="Timeframe"></div>
+          </div>
+          <div class="market-plot" id="mkt-plot"></div>
+          <p class="chart-note" id="mkt-note"></p>
+        </section>
+
         <div class="section-head">
           <div>
             <h2>Live monitor</h2>

@@ -98,6 +98,14 @@ The Monitor only asks cTrader for **read-only** access: it can't place, change o
 Only **demo** accounts are shown. "cBot (label)" is the label your cBot puts on its trades; trades without
 a label are grouped as "No label".
 
+**Live AUDCAD chart:** the top of the Monitor shows a live candlestick chart of AUDCAD (change it with the
+`MARKET_SYMBOL` setting), using bid prices from one of your connected accounts, so it matches what your cBots
+see. Pick M1, M5, M15, H1, H4 or D1; the last candle updates with every tick. It shows today's change and the
+spread, and draws a dashed line at the entry price of every open trade on that symbol, labelled with the
+account, direction, size and current P&L. Rising candles are hollow green, falling candles solid red.
+
+![Live chart](screenshot-market.png)
+
 **Name your accounts:** click **Name it** on an account to give it your own name and note which
 algorithm runs on it. Names are only stored in the dashboard (`DATA_DIR/account-names.json`) and
 appear in the CSV downloads too.
@@ -220,6 +228,7 @@ If the dashboard itself restarts, it reconnects to bots that are still running a
 | `DATA_DIR` | `./data` | Where accounts, cBot files and passwords are stored. |
 | `PUBLIC_URL` | *(auto on Railway)* | The dashboard's public address, used for cTrader's login redirect. |
 | `TRUST_PROXY` | *(auto on Railway)* | `true` when behind an HTTPS proxy / hosting platform. |
+| `MARKET_SYMBOL` | `AUDCAD` | Symbol for the live candlestick chart at the top of the Monitor. |
 | `CTRADER_IMAGE` | `ghcr.io/spotware/ctrader-console:latest` | cTrader CLI image version. |
 
 ## Security notes
@@ -245,6 +254,7 @@ server/
   history.js         full trade history download -> CSV
   equity.js          balance & equity curves (cTrader deal history + recorded equity samples)
   backup.js          backup & restore of logins, names and history
+  market.js          live prices (spot subscription) and candles (trendbars) for the chart
   ctrader/           Open API JSON/WebSocket client and OAuth helpers
   config.js          settings from environment / .env
   routes.js          REST API + live updates (Server-Sent Events)

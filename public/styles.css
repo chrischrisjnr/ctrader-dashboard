@@ -345,3 +345,32 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .lb-best { background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 700; }
 .lb-best::after { content: " ★"; color: var(--accent); font-size: 0.75rem; }
 #mon-lb-note:empty { display: none; }
+
+/* Live market chart */
+.market { margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px; }
+.market-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.market-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.market-title h3 { margin: 0; font-size: 1.1rem; }
+.mkt-price { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mkt-change, .mkt-spread { font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+.market-plot { position: relative; height: 340px; }
+.market-plot svg { width: 100%; height: 100%; display: block; outline: none; }
+.market-plot svg:focus-visible { outline: 2px solid var(--info); outline-offset: 4px; border-radius: 4px; }
+.market-plot .grid line { stroke: var(--grid); stroke-width: 1; }
+.market-plot .axis text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.market-plot .wick { stroke-width: 1; }
+.market-plot .wick.up, .market-plot .body.up { stroke: var(--accent); }
+.market-plot .body.up { fill: var(--surface); stroke-width: 1.2; }
+.market-plot .wick.down { stroke: var(--danger); }
+.market-plot .body.down { fill: var(--danger); stroke: var(--danger); stroke-width: 1; }
+.market-plot .price-line { stroke-width: 1; stroke-dasharray: 2 3; }
+.market-plot .price-line.up { stroke: var(--accent); }
+.market-plot .price-line.down { stroke: var(--danger); }
+.market-plot .price-tag.up { fill: var(--accent); }
+.market-plot .price-tag.down { fill: var(--danger); }
+.market-plot .price-tag-text { fill: var(--bg); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.market-plot .entry-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 6 4; }
+.market-plot .mark-label { fill: var(--text); font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.market-plot .crosshair { stroke: var(--muted); stroke-width: 1; }
+.market-plot .tooltip .row { justify-content: space-between; gap: 16px; }
+@media (max-width: 640px) { .market-plot { height: 260px; } .mkt-price { font-size: 1.25rem; } }

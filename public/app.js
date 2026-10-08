@@ -515,6 +515,7 @@ function connectEvents() {
     if (source.readyState === EventSource.CLOSED) api('/session').then((s) => s.authenticated || showLogin()).catch(() => {});
   });
   source.addEventListener('instance', (event) => updateInstance(JSON.parse(event.data)));
+  source.addEventListener('price', (event) => onPrice(JSON.parse(event.data)));
   source.addEventListener('monitor', (event) => {
     state.monitor = { ...state.monitor, ...JSON.parse(event.data) };
     renderMonitor();
@@ -611,6 +612,8 @@ function renderMonitor() {
       h('span', { class: 'muted' }, l.accounts.length ? ` · demo accounts ${l.accounts.map((n) => `#${n}`).join(', ')}` : ' · no demo accounts found yet'),
       l.error ? h('p', { class: 'bot-error' }, l.error) : null),
     h('button', { class: 'btn small ghost', onclick: () => removeLogin(l) }, 'Remove'))));
+
+  showMarket(live);
 
   if (!live) {
     $('#mon-totals').replaceChildren();
@@ -720,6 +723,236 @@ function renderMonitor() {
       positions);
   }));
 }
+
+// --- Live market chart ------------------------------------------------------------
+
+const MKT_PERIODS = [['m1', 'M1', 60_000], ['m5', 'M5', 300_000], ['m15', 'M15', 900_000], ['h1', 'H1', 3_600_000], ['h4', 'H4', 14_400_000], ['d1', 'D1', 86_400_000]];
+const market = { period: 'm15', data: null, message: '', hover: null, timer: null, drawQueued: false, loading: false };
+try { market.period = localStorage.getItem('ctdash.mktPeriod') || market.period; } catch { /* storage unavailable */ }
+if (!MKT_PERIODS.some(([k]) => k === market.period)) market.period = 'm15';
+
+const periodMs = (key) => MKT_PERIODS.find(([k]) => k === key)[2];
+
+$('#mkt-periods').replaceChildren(...MKT_PERIODS.map(([key, label]) => h('button', {
+  type: 'button',
+  'aria-pressed': String(key === market.period),
+  onclick: (e) => {
+    market.period = key;
+    try { localStorage.setItem('ctdash.mktPeriod', key); } catch { /* storage unavailable */ }
+    for (const b of e.currentTarget.parentElement.children) b.setAttribute('aria-pressed', String(b === e.currentTarget));
+    market.data = null;
+    market.message = 'Loading candles…';
+    drawMarket();
+    loadMarket();
+  },
+}, label)));
+
+function showMarket(visible) {
+  const box = $('#mon-market');
+  if (box.hidden === !visible) return;
+  box.hidden = !visible;
+  clearInterval(market.timer);
+  market.timer = null;
+  if (visible) {
+    if (!market.data) market.message = 'Loading candles…';
+    loadMarket();
+    market.timer = setInterval(loadMarket, 60_000); // re-sync candles and open trades
+    drawMarket();
+  }
+}
+
+async function loadMarket() {
+  if (market.loading) return;
+  market.loading = true;
+  const period = market.period;
+  try {
+    const data = await api(`/market?period=${period}`);
+    if (period !== market.period) return;
+    market.data = data;
+    market.message = '';
+  } catch (err) {
+    if (!market.data) market.message = err.message;
+  } finally {
+    market.loading = false;
+  }
+  drawMarket();
+}
+
+/** Same rule as the server: a tick extends the last candle or starts a new one. */
+function applyTick(bars, ms, t, price) {
+  const last = bars[bars.length - 1];
+  if (!last || !price) return;
+  if (t >= last[0] + ms) {
+    bars.push([last[0] + Math.floor((t - last[0]) / ms) * ms, price, price, price, price]);
+    if (bars.length > 300) bars.shift();
+  } else if (t >= last[0]) {
+    last[2] = Math.max(last[2], price);
+    last[3] = Math.min(last[3], price);
+    last[4] = price;
+  }
+}
+
+function onPrice(q) {
+  const d = market.data;
+  if (!d || q.symbol !== d.symbol) return;
+  d.bid = q.bid;
+  d.ask = q.ask;
+  d.t = q.t;
+  applyTick(d.candles, periodMs(d.period), q.t || Date.now(), q.bid);
+  if (!market.drawQueued) {
+    market.drawQueued = true;
+    requestAnimationFrame(() => { market.drawQueued = false; drawMarket(); });
+  }
+}
+
+function drawMarket() {
+  const plot = $('#mkt-plot');
+  const width = plot.clientWidth;
+  const d = market.data;
+  if (!d || !d.candles?.length) {
+    plot.replaceChildren(h('div', { class: 'chart-msg' }, market.message || 'No price data yet.'));
+    $('#mkt-note').textContent = '';
+    return;
+  }
+  if (!width) return;
+  const height = plot.clientHeight;
+  const digits = d.digits ?? 5;
+  const fmt = (v) => v.toFixed(digits);
+  const pip = 10 ** -(digits - 1);
+
+  // Header: price, today's change, spread.
+  $('#mkt-symbol').textContent = d.symbol;
+  $('#mkt-bid').textContent = d.bid ? fmt(d.bid) : '—';
+  const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+  const dayOpen = d.period === 'd1' ? d.candles.at(-2)?.[4] : d.candles.find((c) => c[0] >= startOfDay.getTime())?.[1];
+  if (dayOpen && d.bid) {
+    const ch = (d.bid / dayOpen - 1) * 100;
+    $('#mkt-change').replaceChildren(h('span', { class: ch > 0 ? 'pos' : ch < 0 ? 'neg' : 'muted' }, `${ch > 0 ? '+' : ''}${ch.toFixed(2)}% today`));
+  } else $('#mkt-change').replaceChildren();
+  $('#mkt-spread').textContent = d.bid && d.ask ? `Spread ${((d.ask - d.bid) / pip).toFixed(1)} pips` : '';
+  const age = d.t ? Math.round((Date.now() - d.t) / 1000) : null;
+  $('#mkt-note').textContent = `Live bid prices from your account ${d.source || ''}${age !== null && age > 120 ? ' · market quiet or closed (last tick ' + new Date(d.t).toLocaleTimeString() + ')' : ''}${d.positions.length ? ' · dashed lines = your open trades' : ''}`;
+
+  // Layout and scales.
+  const m = { top: 10, right: 70, bottom: 24, left: 8 };
+  const plotW = width - m.left - m.right;
+  const n = Math.max(10, Math.min(d.candles.length, Math.floor(plotW / 7)));
+  const bars = d.candles.slice(-n);
+  const step = plotW / bars.length;
+  let lo = Math.min(...bars.map((b) => b[3]));
+  let hi = Math.max(...bars.map((b) => b[2]));
+  if (d.bid) { lo = Math.min(lo, d.bid); hi = Math.max(hi, d.bid); }
+  const span = hi - lo || pip;
+  // Include open trades if they're reasonably close; far-away ones get an arrow at the edge.
+  for (const p of d.positions) if (p.price >= lo - span && p.price <= hi + span) { lo = Math.min(lo, p.price); hi = Math.max(hi, p.price); }
+  const pad = (hi - lo) * 0.06 || pip;
+  lo -= pad; hi += pad;
+  const X = (i) => m.left + (i + 0.5) * step;
+  const Y = (v) => m.top + (1 - (v - lo) / (hi - lo)) * (height - m.top - m.bottom);
+
+  const root = svg('svg', { viewBox: `0 0 ${width} ${height}`, tabindex: '0', role: 'img', 'aria-label': `${d.symbol} candlestick chart. Use left and right arrow keys to read candles.` });
+  const grid = svg('g', { class: 'grid' });
+  const axis = svg('g', { class: 'axis' });
+  const tickStep = niceStep((hi - lo) / 5);
+  for (let v = Math.ceil(lo / tickStep) * tickStep; v <= hi; v += tickStep) {
+    grid.append(svg('line', { x1: m.left, x2: width - m.right, y1: Y(v), y2: Y(v) }));
+    const label = svg('text', { x: width - m.right + 6, y: Y(v) + 4 });
+    label.textContent = fmt(v);
+    axis.append(label);
+  }
+  const every = Math.max(1, Math.ceil(bars.length / Math.max(2, Math.floor(plotW / 110))));
+  let prevDay = null;
+  bars.forEach((b, i) => {
+    if (i % every !== 0 || X(i) < m.left + 24) return; // skip a label that would be cut off at the edge
+    const date = new Date(b[0]);
+    const day = date.toDateString();
+    const label = svg('text', { x: X(i), y: height - 6, 'text-anchor': 'middle' });
+    // Daily-ish timeframes show dates; intraday shows times, with the date where a new day starts.
+    label.textContent = d.period === 'd1' || d.period === 'h4' || (prevDay !== null && day !== prevDay)
+      ? date.toLocaleDateString([], { day: 'numeric', month: 'short' })
+      : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    prevDay = day;
+    axis.append(label);
+  });
+  root.append(grid, axis);
+
+  // Candles: rising = hollow green, falling = solid red (shape differs, not just colour).
+  const candles = svg('g', { class: 'candles' });
+  const bodyW = Math.max(1, Math.min(12, step * 0.65));
+  bars.forEach((b, i) => {
+    const [, o, high, low, c] = b;
+    const up = c >= o;
+    const cls = up ? 'up' : 'down';
+    candles.append(svg('line', { x1: X(i), x2: X(i), y1: Y(high), y2: Y(low), class: `wick ${cls}` }));
+    const top = Y(Math.max(o, c));
+    candles.append(svg('rect', { x: X(i) - bodyW / 2, y: top, width: bodyW, height: Math.max(1, Y(Math.min(o, c)) - top), class: `body ${cls}` }));
+  });
+  root.append(candles);
+
+  // Open trades on this symbol.
+  const marks = svg('g', { class: 'marks' });
+  for (const p of d.positions) {
+    const inside = p.price >= lo && p.price <= hi;
+    const y = inside ? Y(p.price) : p.price > hi ? m.top + 6 : height - m.bottom - 4;
+    if (inside) marks.append(svg('line', { x1: m.left, x2: width - m.right, y1: y, y2: y, class: 'entry-line' }));
+    const label = svg('text', { x: m.left + 4, y: y - 4, class: 'mark-label' });
+    label.textContent = `${inside ? '' : p.price > hi ? '↑ ' : '↓ '}${p.account} · ${p.side} ${p.lots ?? ''} @ ${fmt(p.price)} · ${p.netPnl > 0 ? '+' : ''}${fmtMoney(p.netPnl, p.currency)}`;
+    marks.append(label);
+  }
+  root.append(marks);
+
+  // Live price line and tag on the price axis.
+  if (d.bid) {
+    const y = Y(d.bid);
+    const last = bars[bars.length - 1];
+    const rising = last[4] >= last[1];
+    root.append(svg('line', { x1: m.left, x2: width - m.right, y1: y, y2: y, class: `price-line ${rising ? 'up' : 'down'}` }));
+    root.append(svg('rect', { x: width - m.right + 2, y: y - 9, width: m.right - 4, height: 18, rx: 4, class: `price-tag ${rising ? 'up' : 'down'}` }));
+    const tag = svg('text', { x: width - m.right + 6, y: y + 4, class: 'price-tag-text' });
+    tag.textContent = fmt(d.bid);
+    root.append(tag);
+  }
+
+  // Hover / keyboard read-out.
+  const cross = svg('line', { class: 'crosshair', y1: m.top, y2: height - m.bottom, visibility: 'hidden' });
+  root.append(cross);
+  const tip = h('div', { class: 'tooltip', hidden: true });
+  const show = (i) => {
+    i = Math.max(0, Math.min(bars.length - 1, i));
+    market.hover = bars[i][0];
+    const [t, o, high, low, c] = bars[i];
+    cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('visibility', 'visible');
+    const row = (label, v) => h('div', { class: 'row' }, h('span', { class: 'lbl' }, label), h('strong', {}, fmt(v)));
+    tip.replaceChildren(
+      h('div', { class: 'when' }, new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })),
+      row('Open', o), row('High', high), row('Low', low), row('Close', c),
+      h('div', { class: 'row' }, h('span', { class: 'lbl' }, 'Change'), h('span', { class: c >= o ? 'pos' : 'neg' }, `${c >= o ? '+' : ''}${((c - o) / pip).toFixed(1)} pips`)));
+    tip.hidden = false;
+    const x = X(i);
+    tip.style.left = `${x + 14 + tip.offsetWidth > width - m.right ? x - 14 - tip.offsetWidth : x + 14}px`;
+    tip.style.top = `${m.top}px`;
+  };
+  const hide = () => { market.hover = null; cross.setAttribute('visibility', 'hidden'); tip.hidden = true; };
+  root.addEventListener('pointermove', (e) => {
+    const box = root.getBoundingClientRect();
+    show(Math.floor(((e.clientX - box.left) / box.width * width - m.left) / step));
+  });
+  root.addEventListener('pointerleave', hide);
+  root.addEventListener('blur', hide);
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const current = market.hover === null ? bars.length - 1 : bars.findIndex((b) => b[0] === market.hover);
+    show(current + (e.key === 'ArrowLeft' ? -1 : 1));
+  });
+  plot.replaceChildren(root, tip);
+  if (market.hover !== null) {
+    const i = bars.findIndex((b) => b[0] === market.hover);
+    if (i >= 0) show(i);
+  }
+}
+
+new ResizeObserver(() => drawMarket()).observe($('#mkt-plot'));
 
 // --- Leaderboard ------------------------------------------------------------------
 

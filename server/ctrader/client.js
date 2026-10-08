@@ -33,11 +33,16 @@ export const PT = Object.freeze({
   GET_POSITION_UNREALIZED_PNL_RES: 2188,
   ORDER_LIST_REQ: 2175,
   ORDER_LIST_RES: 2176,
+  SUBSCRIBE_SPOTS_REQ: 2127,
+  SUBSCRIBE_SPOTS_RES: 2128,
+  SPOT_EVENT: 2131,
+  GET_TRENDBARS_REQ: 2137,
+  GET_TRENDBARS_RES: 2138,
 });
 
 // cTrader limits each connection to about 50 requests/second, and 5/second for history
 // requests. All requests go through one queue that stays safely under both limits.
-const HISTORICAL = new Set([PT.DEAL_LIST_REQ, PT.ORDER_LIST_REQ]);
+const HISTORICAL = new Set([PT.DEAL_LIST_REQ, PT.ORDER_LIST_REQ, PT.GET_TRENDBARS_REQ]);
 const GAP_MS = 30; // ~33 requests per second
 const HISTORICAL_GAP_MS = 300; // ~3.3 history requests per second
 const RATE_LIMIT_RETRIES = 6;

@@ -107,3 +107,17 @@ test('trade stats: profit factor (overall, long, short), win rate and pips', asy
   assert.ok(sharpe.value > 10);
   assert.equal(dailySharpe(pts.slice(0, 4)).value, null, 'too few days');
 });
+
+test('live ticks extend the current candle or start a new one', async () => {
+  const { updateBars } = await import('../server/market.js');
+  const bars = [[0, 1.0, 1.1, 0.9, 1.05]];
+  updateBars(bars, 60_000, 30_000, 1.2); // same minute: new high, close moves
+  assert.deepEqual(bars, [[0, 1.0, 1.2, 0.9, 1.2]]);
+  updateBars(bars, 60_000, 30_000, 0.8); // new low
+  assert.deepEqual(bars[0], [0, 1.0, 1.2, 0.8, 0.8]);
+  updateBars(bars, 60_000, 185_000, 0.85); // three minutes later: new candle at its period start
+  assert.deepEqual(bars[1], [180_000, 0.85, 0.85, 0.85, 0.85]);
+  updateBars(bars, 60_000, 10_000, 5); // a stale tick is ignored
+  assert.equal(bars.length, 2);
+  assert.equal(bars[1][2], 0.85);
+});

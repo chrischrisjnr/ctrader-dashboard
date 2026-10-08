@@ -260,6 +260,17 @@ export function createApi({ store, manager, monitor, config, auth }) {
     res.json({ ...result, snapshot: monitor.snapshot() });
   });
 
+  // --- live market chart --------------------------------------------------------
+
+  api.get('/market', async (req, res) => {
+    const period = String(req.query.period || 'm15');
+    try {
+      res.json(await monitor.marketView(period));
+    } catch (err) {
+      throw new HttpError(409, err.message);
+    }
+  });
+
   api.post('/monitor/disconnect', async (_req, res) => {
     await monitor.disconnect();
     res.json(monitor.snapshot());
@@ -297,15 +308,18 @@ export function createApi({ store, manager, monitor, config, auth }) {
     const onInstance = (view) => send('instance', view);
     const onLog = (payload) => send('log', payload);
     const onMonitor = (snapshot) => send('monitor', snapshot);
+    const onPrice = (quote) => send('price', quote);
     const heartbeat = setInterval(() => res.write(': ping\n\n'), 25_000);
     manager.on('instance', onInstance);
     manager.on('log', onLog);
     monitor.on('update', onMonitor);
+    monitor.on('price', onPrice);
     req.on('close', () => {
       clearInterval(heartbeat);
       manager.off('instance', onInstance);
       manager.off('log', onLog);
       monitor.off('update', onMonitor);
+      monitor.off('price', onPrice);
     });
   });
 

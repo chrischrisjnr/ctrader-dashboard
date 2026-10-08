@@ -234,3 +234,23 @@ test('stays within cTrader\'s history rate limit, so figures calculate for every
   assert.ok(snap.accounts.every((a) => !a.performance.statsError));
   assert.ok(!fake.log.includes('rate-limited'), 'never went over the limit');
 });
+
+test('live market chart: candles from cTrader, updated by live ticks, with open trades marked', async (t) => {
+  const { monitor } = await setup(t);
+  await connect(monitor);
+  monitor.beginLogin('x');
+  await monitor.finishLogin({ code: 'code-2', redirectUri: 'x' });
+  await waitFor(monitor, (s) => s.state === 'connected' && s.accounts.length === 3);
+  // Wait for the first live tick.
+  await new Promise((resolve) => monitor.once('price', resolve));
+  const view = await monitor.marketView('m15');
+  assert.equal(view.symbol, 'AUDCAD');
+  assert.equal(view.digits, 5);
+  assert.ok(view.candles.length >= 100);
+  const [time, open, high, low, close] = view.candles.at(-1);
+  assert.ok(high >= Math.max(open, close) && low <= Math.min(open, close), 'valid OHLC');
+  assert.equal(close, view.bid, 'last candle follows the live bid');
+  assert.ok(time <= Date.now());
+  assert.deepEqual(view.positions.map((p) => [p.side, p.price, p.label]), [['Sell', 0.9903, 'MRZ_Short']]);
+  await assert.rejects(monitor.marketView('m7'), /Unknown timeframe/);
+});
